@@ -66,7 +66,7 @@ flowchart TB
     REDIS[("Redis\n(bucket state)")]
     CTRL[Controllers]
     GET["Open GET points\n(public/unauthenticated reads)"]
-    AUTH["Auth Service\n(3rd-party OAuth,\nRBAC enforcement,\nJWT session validation)"]
+    AUTH["Auth Service\n(3rd-party OAuth,\nRBAC enforcement,\nsession validation)"]
     ADMIN["Administration Service\n(server/channel CRUD,\ninvites, role promotion,\nRBAC rule storage)"]
     CHAT["Chat Service\n(messages, history,\ntyping, fan-out)"]
     PRES["Presence module\n(connection registry,\nheartbeat, online/offline)"]
@@ -101,7 +101,7 @@ flowchart TB
 
 | Module | Owns |
 |---|---|
-| **Auth Service** | OAuth provider integration (Google, GitHub — pluggable), auth session/JWT issuance & validation, RBAC *enforcement* (declarative, e.g. decorators on route handlers) |
+| **Auth Service** | OAuth provider integration (Google, GitHub — pluggable), auth session issuance & validation (opaque session ID, Redis-backed — see [auth-service.md §3](./auth-service.md)), RBAC *enforcement* (declarative, e.g. decorators on route handlers) |
 | **Administration Service** | Server & channel CRUD, invite link lifecycle (generate/revoke/regenerate), role promotion (member → mod), RBAC *rule storage* (channel-creation policy, channel-level overrides) |
 | **Chat Service** | Messages (post/edit/soft-delete), history pagination, typing indicator, real-time fan-out to channel subscribers |
 | **Presence module** | Connection registry (userId → connectionId/lastHeartbeat), heartbeat handling, online/offline state, live presence broadcast |
@@ -116,13 +116,13 @@ flowchart TB
 | | Auth Service (auth session) | Presence module (connection session) |
 |---|---|---|
 | Answers | "Who is this request from, and are they logged in?" | "Is this user connected and active *right now*?" |
-| Backed by | JWT (or signed cookie), issued at login | In-memory map (or Redis), mutated live |
+| Backed by | Opaque session ID (Redis-backed cookie), issued at login | In-memory map (or Redis), mutated live |
 | Lifetime | Hours/days — token validity | Seconds — heartbeat window (~30s) |
 | Written on | Login / logout | WS connect / heartbeat / disconnect |
 | Storage need | None (stateless verify), or a small revocation list | Must be stored and mutated continuously |
 | Cardinality | One per login | One per active connection (multiple per user across tabs/devices) |
 
-Auth Service is consulted once, at WS handshake, to validate the JWT. From then on, the **Presence module** owns and mutates the live connection registry — it's the thing that changes constantly and drives the green-dot broadcast, so it needs its own storage concern independent of the auth token's lifecycle.
+Auth Service is consulted once, at WS handshake, to validate the session (same cookie used for REST — sent automatically on the upgrade request). From then on, the **Presence module** owns and mutates the live connection registry — it's the thing that changes constantly and drives the green-dot broadcast, so it needs its own storage concern independent of the auth token's lifecycle.
 
 ### 4.1 Rate Limiter — Decided Design
 
