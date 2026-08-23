@@ -36,12 +36,17 @@ jobs:
 
       - run: npm run typecheck
 
-      # TODO(#7): `npx prisma migrate deploy -w @huddle/api` goes here, once
-      # migrations exist. That step is the point at which this job first needs
-      # a real database, so it adds the Postgres service container too.
+      # Catches a malformed schema without needing a server. Applying the
+      # migrations themselves is deliberately not done here: that is the step
+      # that would drag a Postgres service container into this job, and
+      # migrations stay a local and deploy-time concern. `npm run db:migrate`
+      # locally, `npm run db:migrate:deploy` on a real deployment.
+      - run: npx prisma validate --config apps/api/prisma.config.ts
 
       - run: npm test
 
-      # No `npm run test:e2e` here. It boots the whole application, which now
-      # connects to Postgres, and this job deliberately runs without a
-      # database. Run it locally against Docker: `npm run db:up && npm run test:e2e`.
+      # No `npm run test:e2e` or `npm run test:integration` here. Both need a
+      # real Postgres -- e2e boots the whole application, and the integration
+      # suite asserts constraints against the huddle_test database -- and this
+      # job deliberately runs without one. Run them locally against Docker:
+      # `npm run db:up && npm run test:integration && npm run test:e2e`.
