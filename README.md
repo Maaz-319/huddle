@@ -32,10 +32,34 @@ An npm workspaces monorepo:
 ## Getting started
 
 ```
+git clone https://github.com/Maaz-319/huddle.git
+cd huddle
 npm install
+npm run db:up
+cp .env.example .env
+npm run dev
 ```
 
-Run it from the repo root — the workspaces resolve from there, and there is a single
-`package-lock.json` at the root. Never run `npm install` inside `apps/*`.
+Run every command from the repo root — the workspaces resolve from there, and there is
+a single `package-lock.json` at the root. Never run `npm install` inside `apps/*`.
 
-There is no application to start yet; the API is scaffolded in the next ticket.
+`npm run dev` starts the API in watch mode on port 3000.
+
+## Local infrastructure
+
+Postgres and Redis run in Docker, defined in [`docker-compose.yml`](docker-compose.yml).
+Postgres keeps a named volume; Redis deliberately runs with persistence off, because
+everything it holds in this project is ephemeral.
+
+| Script | What it does |
+|---|---|
+| `npm run db:up` | Start Postgres and Redis in the background |
+| `npm run db:down` | Stop both containers, keeping the Postgres volume |
+| `npm run db:reset` | Tear down **including volumes** and come back up empty |
+
+First boot creates two databases: `huddle` for development and `huddle_test` for the
+integration tests, so a test run can never truncate your development data. That happens
+via [`docker/init.sql`](docker/init.sql), which the Postgres image runs only when the
+data volume is empty — so editing it later requires a `db:reset` to take effect.
+
+> `db:reset` drops volumes. Only ever run it against local Docker.
