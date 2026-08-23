@@ -1,0 +1,23 @@
+// Prisma 7. Two things here differ from almost every guide online:
+//
+//   - the datasource block has no `url`. The connection string lives in
+//     ../prisma.config.ts, read from DATABASE_URL.
+//   - the client is generated into src/generated/prisma, not node_modules.
+//     That folder is git-ignored and rebuilt by the postinstall script.
+//
+// No models yet. The schema lands in full in ticket #7.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+
+  // Emit extensionless imports. The default, "js", makes the generated client
+  // import "./enums.js", which Jest's resolver cannot map back to the .ts file
+  // that is actually there.
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}

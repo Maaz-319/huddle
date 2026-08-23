@@ -12,4 +12,4 @@ coverage/
 !.env.example
 
 # Prisma 7 generates its client into the project folder, not node_modules.
-apps/api/generated/
+apps/api/src/generated/
