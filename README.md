@@ -47,8 +47,27 @@ a single `package-lock.json` at the root. Never run `npm install` inside `apps/*
 
 ```
 curl localhost:3000/health
-{"status":"ok","info":{"app":{"status":"up"}},"error":{},"details":{"app":{"status":"up"}}}
+{"status":"ok","info":{"app":{"status":"up"},"database":{"status":"up"}},...}
 ```
+
+The `database` entry is a real query against Postgres, so stopping the container
+turns this endpoint `503` rather than leaving it green.
+
+## The Prisma client
+
+This project is on **Prisma 7**, which differs from most guides online: it is Rust-free
+and reaches Postgres through the `@prisma/adapter-pg` driver adapter, there is **no
+`url` in the `datasource` block** (the connection string lives in
+[`apps/api/prisma.config.ts`](apps/api/prisma.config.ts)), and the client is generated
+into `apps/api/src/generated/prisma` rather than `node_modules`.
+
+That folder is git-ignored and rebuilt by a `postinstall` script, so a fresh clone
+compiles without a manual step. Import `PrismaClient` from there, never from
+`@prisma/client`.
+
+`PrismaService` ([`apps/api/src/common/prisma.service.ts`](apps/api/src/common/prisma.service.ts))
+is the injectable wrapper and the only place the connection opens or closes. Only
+`adapters/*.adapter.ts` files may inject it — never a `*.service.ts`.
 
 ## Configuration
 
@@ -95,16 +114,16 @@ data volume is empty — so editing it later requires a `db:reset` to take effec
 
 Every pull request, and every push to `main`, runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on GitHub Actions: `npm ci`,
-then lint, typecheck, unit tests, and end-to-end tests.
+then lint, typecheck, and unit tests.
 
-CI runs no Postgres or Redis. Nothing in the suite connects to either yet, so the
-containers stay a local concern — `npm run db:up` is for your machine. The job sets
-`DATABASE_URL` and `REDIS_URL` only because boot-time validation requires them.
+CI runs no Postgres or Redis, so it does not run the end-to-end tests — those boot the
+whole application, which connects to the database. Run them locally instead:
+`npm run db:up && npm run test:e2e`.
 
 | Script | What it does |
 |---|---|
 | `npm run lint` | ESLint with `--fix`, for local use |
 | `npm run lint:ci` | The same rules without `--fix`, so a fixable violation fails the build |
 | `npm run typecheck` | `tsc --noEmit` across the API |
-| `npm test` | Unit tests |
-| `npm run test:e2e` | End-to-end tests |
+| `npm test` | Unit tests. No Docker needed |
+| `npm run test:e2e` | End-to-end tests. Needs `npm run db:up` |
