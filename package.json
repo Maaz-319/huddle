@@ -4,6 +4,14 @@
   "private": true,
   "description": "A simplified Discord: servers, channels, real-time chat, and presence.",
   "license": "UNLICENSED",
+  "scripts": {
+    "dev": "npm run start:dev -w @huddle/api",
+    "build": "npm run build -w @huddle/api",
+    "test": "npm run test -w @huddle/api",
+    "test:e2e": "npm run test:e2e -w @huddle/api",
+    "lint": "npm run lint -w @huddle/api",
+    "typecheck": "tsc -p apps/api/tsconfig.json --noEmit"
+  },
   "workspaces": [
     "apps/*"
   ],
