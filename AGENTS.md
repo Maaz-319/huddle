@@ -99,7 +99,7 @@ Read [docs/architecture/data-model.md](docs/architecture/data-model.md) before t
 
 - There is **no `url` in the `datasource` block**. Connection config lives in `apps/api/prisma.config.ts`.
 - It is Rust-free and needs the **`@prisma/adapter-pg` driver adapter**.
-- The client is generated into **`apps/api/generated/prisma`**, not `node_modules`. Import `PrismaClient` from there, **not from `@prisma/client`**. That folder is git-ignored and regenerated on install.
+- The client is generated into **`apps/api/src/generated/prisma`**, not `node_modules`. Import `PrismaClient` from there, **not from `@prisma/client`**. That folder is git-ignored and regenerated on install.
 
 The schema is authored once, in full, in Phase 1 — all eight tables. Later phases consume it rather than growing it. Things that look like bugs but are deliberate, and are explained in `data-model.md`:
 
