@@ -245,4 +245,18 @@ erDiagram
 
 - Invite **expiration**/**max-use** limits ([administration-service.md §7](./administration-service.md)) would add columns to `Invite` (`expiresAt`, `maxUses`, `useCount`) — not built now.
 - Whether `ChannelOverride` needs a `createdBy`/`updatedAt` audit trail — not raised as a requirement, revisit if needed.
-- Full Prisma schema syntax (this doc is the conceptual model; translating to `schema.prisma` is an implementation step, not a design decision).
+
+**Closed:** ~~Full Prisma schema syntax~~ — settled in `apps/api/prisma/schema.prisma`, applied by migration `20260823150824_init`.
+
+The partial unique index in §4.3 uses Prisma's **`partialIndexes` preview feature**, which is available on Prisma 7.9.1:
+
+```prisma
+@@unique([serverId], where: raw("role = 'owner'"), map: "membership_one_owner_per_server")
+```
+
+The raw-SQL fallback was **not** taken, so later migrations are produced with plain `prisma migrate dev` — there is no need for the `prisma migrate diff --from-schema-datamodel ... --script` workflow that the fallback would have forced on every subsequent migration.
+
+Two referential actions were not specified above and were decided during implementation:
+
+- **Cascade** from `Server` to `Membership`, `Channel`, and `Invite`, and from `Channel` to `Message`, `ChannelMember`, and `ChannelOverride`. Server and channel deletion are hard deletes (§4.4, [administration-service.md §2](./administration-service.md)); without these a `DELETE` would be rejected rather than cascading.
+- **Restrict** on every relation pointing at `User` (`Membership.user`, `ChannelMember.user`, `Message.author`). No feature deletes a user, and `Restrict` says so honestly — a cascade here would silently erase a person's message history the first time account deletion is built.
