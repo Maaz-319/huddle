@@ -1,0 +1,13 @@
+{
+  "name": "huddle",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A simplified Discord: servers, channels, real-time chat, and presence.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
+}
