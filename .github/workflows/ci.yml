@@ -42,4 +42,6 @@ jobs:
 
       - run: npm test
 
-      - run: npm run test:e2e
+      # No `npm run test:e2e` here. It boots the whole application, which now
+      # connects to Postgres, and this job deliberately runs without a
+      # database. Run it locally against Docker: `npm run db:up && npm run test:e2e`.
