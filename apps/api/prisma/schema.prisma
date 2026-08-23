@@ -5,7 +5,9 @@
 //   - the client is generated into src/generated/prisma, not node_modules.
 //     That folder is git-ignored and rebuilt by the postinstall script.
 //
-// No models yet. The schema lands in full in ticket #7.
+// docs/architecture/data-model.md is the authority for everything below. The
+// whole schema is authored here, once; later phases consume it rather than
+// growing it.
 
 generator client {
   provider     = "prisma-client"
@@ -16,8 +18,170 @@ generator client {
   // import "./enums.js", which Jest's resolver cannot map back to the .ts file
   // that is actually there.
   importFileExtension = ""
+
+  // For Membership's `UNIQUE (serverId) WHERE role = 'owner'`. Supported by
+  // the schema engine on 7.9.1, so the raw-SQL fallback in data-model.md
+  // section 7 was not needed.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum Role {
+  owner
+  moderator
+  member
+}
+
+enum ChannelCreationPolicy {
+  owner_only
+  everyone
+  mods_only
+}
+
+enum Capability {
+  view
+  post
+  delete_others
+  manage_settings
+}
+
+// Separate from Role on purpose: an owner is never overridable and always has
+// full capability. See data-model.md section 4.6.
+enum OverrideRole {
+  moderator
+  member
+}
+
+// Every id below is a Snowflake: 64-bit, so BigInt. An Int column would
+// silently overflow. Ticket #8 turns these into strings on the wire.
+
+model User {
+  id        BigInt  @id
+  githubId  String  @unique
+  username  String
+  avatarUrl String
+  email     String
+  bio       String?
+
+  // No createdAt, deliberately. Nothing reads a user's join date, and the
+  // Snowflake carries the timestamp anyway. See data-model.md section 3.
+
+  memberships    Membership[]
+  channelMembers ChannelMember[]
+  messages       Message[]
+}
+
+model Server {
+  id                    BigInt                @id
+  name                  String
+  iconUrl               String?
+  channelCreationPolicy ChannelCreationPolicy
+  memberInviteToggle    Boolean
+  createdAt             DateTime              @default(now())
+
+  memberships Membership[]
+  channels    Channel[]
+  invite      Invite?
+}
+
+model Membership {
+  serverId BigInt
+  userId   BigInt
+  role     Role
+  joinedAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  // No cascade from User: nothing deletes a user, and Restrict is the honest
+  // encoding of that. The same applies to ChannelMember and Message.
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([serverId, userId])
+  // "Which servers does this user belong to."
+  @@index([userId])
+  // Exactly one owner per server, enforced by the database rather than by
+  // application code. This is what makes ownership transfer a single
+  // transaction flipping both rows: two sequential updates cannot satisfy it.
+  //
+  // raw() is literal SQL against the column, so `role` must never be @map-ed.
+  @@unique([serverId], where: raw("role = 'owner'"), map: "membership_one_owner_per_server")
+}
+
+model Channel {
+  id        BigInt   @id
+  serverId  BigInt
+  name      String
+  isPrivate Boolean
+  createdAt DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  members   ChannelMember[]
+  overrides ChannelOverride[]
+  messages  Message[]
+
+  @@unique([serverId, name])
+}
+
+// Private-channel membership only. A public channel has no rows here;
+// visibility is implied by server membership.
+model ChannelMember {
+  channelId BigInt
+  userId    BigInt
+  addedAt   DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([channelId, userId])
+}
+
+// Tighten-only capability override.
+//
+// There is no value column, deliberately: the row existing IS the revocation,
+// and no row means the role inherits the server-wide default. Overrides can
+// only tighten, so presence alone says everything there is to say -- there is
+// no way to represent a grant here. See data-model.md section 4.6.
+model ChannelOverride {
+  channelId  BigInt
+  role       OverrideRole
+  capability Capability
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, role, capability])
+}
+
+// One row per server, updated in place on regenerate: same slot, new code.
+model Invite {
+  id        BigInt    @id
+  serverId  BigInt    @unique
+  code      String    @unique
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id        BigInt    @id
+  channelId BigInt
+  authorId  BigInt
+  content   String
+  editedAt  DateTime?
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  // No createdAt, deliberately -- it is decoded from the Snowflake id.
+  // See data-model.md section 3.
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  // Cursor pagination and reconnect catch-up both walk this index, since id
+  // sorts by creation time. Phases 7 and 8 depend on it.
+  @@index([channelId, id])
 }
