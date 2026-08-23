@@ -8,13 +8,17 @@
     "dev": "npm run start:dev -w @huddle/api",
     "build": "npm run build -w @huddle/api",
     "test": "npm run test -w @huddle/api",
+    "test:integration": "npm run test:integration -w @huddle/api",
     "test:e2e": "npm run test:e2e -w @huddle/api",
     "lint": "npm run lint -w @huddle/api",
     "lint:ci": "npm run lint:ci -w @huddle/api",
     "typecheck": "tsc -p apps/api/tsconfig.json --noEmit",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:reset": "docker compose down -v && docker compose up -d"
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "db:migrate": "npm run db:migrate -w @huddle/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy -w @huddle/api",
+    "db:studio": "npm run db:studio -w @huddle/api"
   },
   "workspaces": [
     "apps/*"

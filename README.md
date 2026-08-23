@@ -37,6 +37,7 @@ cd huddle
 npm install
 npm run db:up
 cp apps/api/.env.example apps/api/.env
+npm run db:migrate
 npm run dev
 ```
 
@@ -68,6 +69,28 @@ compiles without a manual step. Import `PrismaClient` from there, never from
 `PrismaService` ([`apps/api/src/common/prisma.service.ts`](apps/api/src/common/prisma.service.ts))
 is the injectable wrapper and the only place the connection opens or closes. Only
 `adapters/*.adapter.ts` files may inject it — never a `*.service.ts`.
+
+## The database schema
+
+All eight tables live in [`apps/api/prisma/schema.prisma`](apps/api/prisma/schema.prisma),
+authored in one pass and consumed — not grown — by later phases.
+[`docs/architecture/data-model.md`](docs/architecture/data-model.md) is the authority for
+what belongs in it.
+
+| Script | What it does |
+|---|---|
+| `npm run db:migrate` | `prisma migrate dev` — apply and generate migrations |
+| `npm run db:migrate:deploy` | `prisma migrate deploy` — apply only, for CI and deploys |
+| `npm run db:studio` | Prisma Studio, a browser UI over the data |
+
+Migrations are generated artifacts and are never hand-edited. Three things in the schema
+look like omissions and are not:
+
+- `User` and `Message` have no `createdAt` — it is decoded from the Snowflake ID.
+- `ChannelOverride` has no value column — the row existing **is** the revocation.
+- `Membership` carries `UNIQUE (serverId) WHERE role = 'owner'`, a partial unique index
+  that enforces one owner per server in the database. It uses Prisma's `partialIndexes`
+  preview feature, so ordinary `prisma migrate dev` keeps working.
 
 ## Configuration
 
@@ -116,9 +139,10 @@ Every pull request, and every push to `main`, runs
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on GitHub Actions: `npm ci`,
 then lint, typecheck, and unit tests.
 
-CI runs no Postgres or Redis, so it does not run the end-to-end tests — those boot the
-whole application, which connects to the database. Run them locally instead:
-`npm run db:up && npm run test:e2e`.
+CI runs no Postgres or Redis, so it runs neither the integration nor the end-to-end
+tests — both need a real database. It does run `prisma validate`, which catches a
+malformed schema without a server. Run the rest locally:
+`npm run db:up && npm run test:integration && npm run test:e2e`.
 
 | Script | What it does |
 |---|---|
@@ -126,4 +150,5 @@ whole application, which connects to the database. Run them locally instead:
 | `npm run lint:ci` | The same rules without `--fix`, so a fixable violation fails the build |
 | `npm run typecheck` | `tsc --noEmit` across the API |
 | `npm test` | Unit tests. No Docker needed |
+| `npm run test:integration` | Schema and adapter tests against `huddle_test`. Needs `npm run db:up` |
 | `npm run test:e2e` | End-to-end tests. Needs `npm run db:up` |
