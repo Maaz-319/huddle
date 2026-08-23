@@ -36,14 +36,41 @@ git clone https://github.com/Maaz-319/huddle.git
 cd huddle
 npm install
 npm run db:up
-cp .env.example .env
+cp apps/api/.env.example apps/api/.env
 npm run dev
 ```
 
 Run every command from the repo root — the workspaces resolve from there, and there is
 a single `package-lock.json` at the root. Never run `npm install` inside `apps/*`.
 
-`npm run dev` starts the API in watch mode on port 3000.
+`npm run dev` starts the API in watch mode. `GET /health` should answer `200`:
+
+```
+curl localhost:3000/health
+{"status":"ok","info":{"app":{"status":"up"}},"error":{},"details":{"app":{"status":"up"}}}
+```
+
+## Configuration
+
+Configuration lives in `apps/api/.env`, copied from
+[`apps/api/.env.example`](apps/api/.env.example). `.env` is git-ignored and never
+committed; `.env.example` is committed with defaults matching the Docker Compose
+services below.
+
+| Variable | Required | Default | What it is |
+|---|---|---|---|
+| `NODE_ENV` | no | `development` | One of `development`, `test`, `production` |
+| `PORT` | no | `3000` | Port the API listens on |
+| `DATABASE_URL` | **yes** | — | Postgres connection string |
+| `REDIS_URL` | **yes** | — | Redis connection string |
+| `WEB_ORIGIN` | no | `http://localhost:5173` | Origin the browser client is served from |
+
+Every variable is validated at startup against
+[`apps/api/src/common/env.validation.ts`](apps/api/src/common/env.validation.ts).
+A missing or malformed value **kills the process at boot**, naming the variable —
+deliberately, so a misconfigured deploy fails immediately rather than at the first
+request that needs the value. Adding a variable means adding it to that class and to
+`.env.example` in the same commit.
 
 ## Local infrastructure
 
