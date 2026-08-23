@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+
+    # No Postgres or Redis here, deliberately. Nothing in the current suite
+    # opens a connection, so a database in CI would be weight for nothing.
+    # The values below only satisfy the boot-time validation in
+    # src/common/env.validation.ts, which requires the variables to be present.
+    # Docker Postgres and Redis stay a local concern; see docker-compose.yml.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://huddle:huddle@localhost:5432/huddle
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # lint:ci is eslint without --fix. `npm run lint` repairs what it can,
+      # which would let a fixable violation pass here unnoticed.
+      - run: npm run lint:ci
+
+      - run: npm run typecheck
+
+      # TODO(#7): `npx prisma migrate deploy -w @huddle/api` goes here, once
+      # migrations exist. That step is the point at which this job first needs
+      # a real database, so it adds the Postgres service container too.
+
+      - run: npm test
+
+      - run: npm run test:e2e
