@@ -90,3 +90,21 @@ via [`docker/init.sql`](docker/init.sql), which the Postgres image runs only whe
 data volume is empty — so editing it later requires a `db:reset` to take effect.
 
 > `db:reset` drops volumes. Only ever run it against local Docker.
+
+## Continuous integration
+
+Every pull request, and every push to `main`, runs
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) on GitHub Actions: `npm ci`,
+then lint, typecheck, unit tests, and end-to-end tests.
+
+CI runs no Postgres or Redis. Nothing in the suite connects to either yet, so the
+containers stay a local concern — `npm run db:up` is for your machine. The job sets
+`DATABASE_URL` and `REDIS_URL` only because boot-time validation requires them.
+
+| Script | What it does |
+|---|---|
+| `npm run lint` | ESLint with `--fix`, for local use |
+| `npm run lint:ci` | The same rules without `--fix`, so a fixable violation fails the build |
+| `npm run typecheck` | `tsc --noEmit` across the API |
+| `npm test` | Unit tests |
+| `npm run test:e2e` | End-to-end tests |
