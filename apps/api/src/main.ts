@@ -18,6 +18,11 @@ async function bootstrap() {
     }),
   );
 
+  // Without this, SIGINT/SIGTERM kill the process before any onModuleDestroy
+  // runs, and the Postgres and Redis connections are dropped rather than
+  // closed.
+  app.enableShutdownHooks();
+
   const port = app.get(ConfigService).getOrThrow<number>('PORT');
   await app.listen(port);
 }

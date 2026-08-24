@@ -20,15 +20,21 @@ describe('Health (e2e)', () => {
     await app.close();
   });
 
-  it('GET /health reports the process and the database as up', async () => {
+  it('GET /health reports the process, the database, and Redis as up', async () => {
     const response = await request(app.getHttpServer()).get('/health');
+
+    const up = {
+      app: { status: 'up' },
+      database: { status: 'up' },
+      redis: { status: 'up' },
+    };
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       status: 'ok',
-      info: { app: { status: 'up' }, database: { status: 'up' } },
+      info: up,
       error: {},
-      details: { app: { status: 'up' }, database: { status: 'up' } },
+      details: up,
     });
   });
 

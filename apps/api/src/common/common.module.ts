@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
+import { RedisService } from './redis.service';
 import { SnowflakeService } from './snowflake.service';
 
 /**
@@ -8,7 +9,7 @@ import { SnowflakeService } from './snowflake.service';
  */
 @Global()
 @Module({
-  providers: [PrismaService, SnowflakeService],
-  exports: [PrismaService, SnowflakeService],
+  providers: [PrismaService, RedisService, SnowflakeService],
+  exports: [PrismaService, RedisService, SnowflakeService],
 })
 export class CommonModule {}
