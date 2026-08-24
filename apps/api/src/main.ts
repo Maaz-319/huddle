@@ -1,4 +1,3 @@
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -10,13 +9,9 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+  // The global ValidationPipe and exception filter are registered in
+  // CommonModule via APP_PIPE / APP_FILTER, not here, so that tests booting
+  // AppModule get the same request pipeline production does.
 
   // Without this, SIGINT/SIGTERM kill the process before any onModuleDestroy
   // runs, and the Postgres and Redis connections are dropped rather than
