@@ -79,6 +79,11 @@ export class AuthModule {}
 ```
 Swapping Redis for something else later means writing a new class implementing `SessionStore` and changing the `useClass` line — `AuthService` and everything above it is untouched.
 
+**The built reference:** `apps/api/src/auth/` holds a real, working example of every rule above — `user-repository.interface.ts` (the port), `adapters/prisma-user-repository.adapter.ts` (the only file there that injects `PrismaService`), and the one-line binding in `auth.module.ts`. It was built in Phase 1 specifically so later services are copied from working code rather than reconstructed from this prose. Two things it demonstrates that are easy to miss:
+
+- **The port declares its own types.** `UserRepository` returns its own `User` interface, not Prisma's generated model. Re-exporting the vendor's type would put a Prisma import in every consumer and defeat the point of the port; the adapter maps its row onto the port's shape.
+- **The port is where vendor errors stop.** The adapter translates Prisma's `P2002` and `P2025` into the shared `ConflictError` / `NotFoundError` from `common/errors.ts`, so no caller ever learns what a Prisma error code is.
+
 ---
 
 ## 4. Swappable Interfaces by Service
@@ -87,6 +92,7 @@ One real adapter is built per interface now — the interface is what makes a se
 
 | Service | Interface (port) | Adapter (now) | Wraps |
 |---|---|---|---|
+| Auth | `UserRepository` | `PrismaUserRepository` | Postgres via Prisma ([auth-service.md §2](./auth-service.md)) — **built, the reference pair** |
 | Auth | `SessionStore` | `RedisSessionStore` | Redis session storage ([auth-service.md §3](./auth-service.md)) |
 | Auth | `OAuthProvider` | `GithubOAuthAdapter` | GitHub OAuth via Passport ([auth-service.md §2](./auth-service.md)) |
 | Administration | `ServerRepository`, `MembershipRepository`, `ChannelRepository`, `InviteRepository` | Prisma-backed adapters | Postgres via Prisma ([data-model.md](./data-model.md)) |
@@ -109,9 +115,36 @@ One real adapter is built per interface now — the interface is what makes a se
 
 ## 6. Testing
 
-- **Unit tests:** service logic (`*.service.ts`) is tested against **in-memory fake adapters** implementing the same interface (e.g. `FakeSessionStore implements SessionStore` backed by a `Map`) — fast, isolated, and proves the interface is actually sufficient for the business logic that depends on it.
-- **Adapter integration tests:** each real adapter (`RedisSessionStore`, `PrismaMessageRepository`, `GithubOAuthAdapter`, etc.) gets its own dedicated test hitting the real backend (Docker Redis / Neon Postgres) — verifies the adapter actually satisfies the interface's contract, so the fakes used in unit tests aren't a false sense of safety.
-- Matches the focused-testing approach already set in [tech-stack.md §10](./tech-stack.md).
+**Every port gets both kinds of test.** A fake alone proves the port is usable, not that the real backend behaves that way; an adapter test alone leaves service unit tests needing Docker. Neither half is optional.
+
+- **The fake** — in-memory, `Map`-backed, `extends` the same abstract class (e.g. `FakeUserRepository extends UserRepository`). `extends`, not duck-typing: adding a method to the port then breaks compilation in the fake, which is the only thing keeping it honest as the port grows. Hands out copies, never its stored objects — a caller mutating what it got back must not rewrite the store, because the real adapter would not behave that way.
+- **The adapter integration test** — the real adapter against the real backend (Docker Postgres / Docker Redis), proving it satisfies the port's contract.
+
+**The shared contract suite.** Both run the *same* assertions. A fake tested only by its own bespoke cases proves nothing about the adapter it stands in for. The convention, built out in `apps/api/test/fakes/user-repository.contract.ts`:
+
+```ts
+export function describeUserRepositoryContract(
+  label: string,
+  createRepository: () => Promise<UserRepository>,
+): void { /* every behavioural assertion, once */ }
+```
+
+The fake's spec calls it with `() => Promise.resolve(new FakeUserRepository())`; the integration spec calls it with a factory that truncates the database and returns the adapter. Cases needing a real database — BigInt precision, columns the port does not expose — go in the integration spec, below the shared contract, not in it.
+
+**Where the files live**, which is otherwise only discoverable by reading `apps/api/test/jest-integration.json`:
+
+| Kind | Location | Suffix | Needs Docker | Run by |
+|---|---|---|---|---|
+| Unit | beside the source in `src/` | `*.spec.ts` | no | `npm test` |
+| Fakes and contract suites | `apps/api/test/fakes/` | `*.spec.ts` for the fake's own run | no | `npm test` |
+| Adapter integration | `apps/api/test/` | `*.integration-spec.ts` | yes | `npm run test:integration` |
+| End to end | `apps/api/test/` | `*.e2e-spec.ts` | yes | `npm run test:e2e` |
+
+`test/fakes/` is test-only code, so it stays out of `src/` — `apps/api/tsconfig.json` sets `rootDir: "./src"` and excludes `test/`, so a `src/` spec importing a fake would break both `npm run typecheck` and `nest build`. The unit Jest project therefore lists `test/fakes` in `roots` alongside `src`, which is what lets the fake's contract run under `npm test` without dragging the Docker-dependent suites in with it.
+
+Integration tests target the separate `huddle_test` database (created by `docker/init.sql`) and truncate between cases via `truncateAll()` in `apps/api/test/prisma-test-client.ts`, so running the suite twice in a row passes both times.
+
+Matches the focused-testing approach already set in [tech-stack.md §10](./tech-stack.md).
 
 ---
 
