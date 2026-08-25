@@ -43,6 +43,22 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   WEB_ORIGIN: string = 'http://localhost:5173';
+
+  /**
+   * How many reverse-proxy hops sit in front of the app, for Express's
+   * `trust proxy`. Zero locally, where nothing is in front; in production it is
+   * the number of proxies Render actually terminates through.
+   *
+   * A count, never `true`. Trusting every hop lets any client forge
+   * `X-Forwarded-For` and mint itself an endless supply of fresh rate-limit
+   * buckets, which defeats the per-IP dimension entirely
+   * (docs/architecture/rate-limiter.md section 3).
+   */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  TRUSTED_PROXY_HOPS: number = 0;
 }
 
 /**
