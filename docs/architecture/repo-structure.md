@@ -140,7 +140,11 @@ The fake's spec calls it with `() => Promise.resolve(new FakeUserRepository())`;
 | Adapter integration | `apps/api/test/` | `*.integration-spec.ts` | yes | `npm run test:integration` |
 | End to end | `apps/api/test/` | `*.e2e-spec.ts` | yes | `npm run test:e2e` |
 
-`test/fakes/` is test-only code, so it stays out of `src/` — `apps/api/tsconfig.json` sets `rootDir: "./src"` and excludes `test/`, so a `src/` spec importing a fake would break both `npm run typecheck` and `nest build`. The unit Jest project therefore lists `test/fakes` in `roots` alongside `src`, which is what lets the fake's contract run under `npm test` without dragging the Docker-dependent suites in with it.
+`test/fakes/` is test-only code, so it stays out of `src/`. The unit Jest project lists `test/fakes` in `roots` alongside `src`, which is what lets the fake's contract run under `npm test` without dragging the Docker-dependent suites in with it.
+
+A service's own unit spec sits beside its source in `src/` and imports the fake from `test/fakes/`, which crosses that boundary. `apps/api/tsconfig.json` therefore sets `rootDir: "."` and includes `test/fakes/**/*` — the fakes are inputs to the typecheck, not to the build. `tsconfig.build.json` pins `rootDir` back to `./src` and keeps its existing `test` and `**/*spec.ts` exclusions, so nothing test-only reaches `dist/` and its layout is unchanged. `npm run typecheck` runs both that project and `test/tsconfig.json`, so the integration and e2e specs are checked too.
+
+Note the direction this permits: a **spec** in `src/` may import from `test/`. Shipped code never may — nothing under `src/` that is not a `*.spec.ts` should ever name a fake.
 
 Integration tests target the separate `huddle_test` database (created by `docker/init.sql`) and truncate between cases via `truncateAll()` in `apps/api/test/prisma-test-client.ts`, so running the suite twice in a row passes both times.
 
