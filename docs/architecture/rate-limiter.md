@@ -52,14 +52,20 @@ No global cross-route backstop per user — per-route buckets are the only cap.
 
 ## 4. Buckets (Starting Budgets, Tunable)
 
-| Route class | Bucket |
-|---|---|
-| Message send | ~5 tokens burst, refill ~1/sec |
-| Typing indicator | Cheap bucket + server-side debounce (don't fan out every keystroke) |
-| Login / OAuth callback (per-IP) | Strict, e.g. 5/min |
-| Invite regenerate, role promotion | Strict, e.g. 3/min |
-| Reads (history, Open GET points) | Generous |
-| **WS connection attempts (per-IP)** | ~5 attempts/min |
+Each route class is a **named policy**. The names are the vocabulary the rest of the system limits in: `@RateLimit('message-send')` on a route, `RateLimiterService.consume('ws-connect', ...)` in the socket.io middleware chain. They are typed as a literal union, so a mistyped name is a build error rather than a silently unlimited route.
+
+| Policy | Route class | Capacity (burst) | Refill | Dimension |
+|---|---|---|---|---|
+| `message-send` | Message send | 5 | 1/sec | channel |
+| `typing` | Typing indicator | 10 | 2/sec | channel |
+| `auth-ip` | Login / OAuth callback | 5 | 5/min | ip |
+| `strict-mutation` | Invite regenerate, role promotion | 3 | 3/min | user |
+| `read` | Reads (history, open GET endpoints) | 60 | 1/sec | user |
+| `ws-connect` | **WS connection attempts** | 5 | 5/min | ip |
+
+The `typing` bucket is only the ceiling behind the **server-side debounce** — the debounce is what stops a keystroke fanning out to 200 watchers, and lands in Phase 8 with the transport it debounces. `ws-connect` is likewise defined now and consumed in Phase 8; the budget belongs with its siblings rather than appearing alone six phases later.
+
+These numbers are starting points and are meant to be retuned. `apps/api/src/rate-limiter/rate-limit-policies.ts` is the live source; this table records what they were chosen to mean.
 
 ---
 
