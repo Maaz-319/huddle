@@ -12,7 +12,7 @@
     "test:e2e": "npm run test:e2e -w @huddle/api",
     "lint": "npm run lint -w @huddle/api",
     "lint:ci": "npm run lint:ci -w @huddle/api",
-    "typecheck": "tsc -p apps/api/tsconfig.json --noEmit",
+    "typecheck": "tsc -p apps/api/tsconfig.json --noEmit && tsc -p apps/api/test/tsconfig.json --noEmit",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d",

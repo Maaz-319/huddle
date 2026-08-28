@@ -6,6 +6,7 @@ const valid = {
   DATABASE_URL: 'postgresql://huddle:huddle@localhost:5432/huddle',
   REDIS_URL: 'redis://localhost:6379',
   WEB_ORIGIN: 'http://localhost:5173',
+  TRUSTED_PROXY_HOPS: '0',
 };
 
 describe('validate', () => {
@@ -57,11 +58,40 @@ describe('validate', () => {
   });
 
   it('falls back to defaults for the optional variables', () => {
-    const config = validate(omit('PORT', 'WEB_ORIGIN', 'NODE_ENV'));
+    const config = validate(
+      omit('PORT', 'WEB_ORIGIN', 'NODE_ENV', 'TRUSTED_PROXY_HOPS'),
+    );
 
     expect(config.PORT).toBe(3000);
     expect(config.WEB_ORIGIN).toBe('http://localhost:5173');
     expect(config.NODE_ENV).toBe(NodeEnv.Development);
+    // Nothing sits in front of the app locally, so no hop may be trusted.
+    expect(config.TRUSTED_PROXY_HOPS).toBe(0);
+  });
+
+  it('coerces TRUSTED_PROXY_HOPS to a number', () => {
+    const config = validate({ ...valid, TRUSTED_PROXY_HOPS: '2' });
+
+    expect(config.TRUSTED_PROXY_HOPS).toBe(2);
+    expect(typeof config.TRUSTED_PROXY_HOPS).toBe('number');
+  });
+
+  it('rejects a TRUSTED_PROXY_HOPS that is not a number', () => {
+    expect(() => validate({ ...valid, TRUSTED_PROXY_HOPS: 'true' })).toThrow(
+      /TRUSTED_PROXY_HOPS/,
+    );
+  });
+
+  it('rejects a negative TRUSTED_PROXY_HOPS', () => {
+    expect(() => validate({ ...valid, TRUSTED_PROXY_HOPS: '-1' })).toThrow(
+      /TRUSTED_PROXY_HOPS/,
+    );
+  });
+
+  it('rejects a fractional TRUSTED_PROXY_HOPS, which is not a hop count', () => {
+    expect(() => validate({ ...valid, TRUSTED_PROXY_HOPS: '1.5' })).toThrow(
+      /TRUSTED_PROXY_HOPS/,
+    );
   });
 
   it('ignores variables it does not declare', () => {
