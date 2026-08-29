@@ -18,7 +18,9 @@ import { ParseSnowflakePipe } from '../common/parse-snowflake.pipe';
 import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import { CreateServerDto } from './create-server.dto';
+import type { Membership } from './membership-repository.interface';
 import type { Server } from './server-repository.interface';
+import { UpdateMemberRoleDto } from './update-member-role.dto';
 import { UpdateServerDto } from './update-server.dto';
 
 /** The shape every server route returns — a `Server`, id serialised per AGENTS.md section 4. */
@@ -39,6 +41,21 @@ function toServerResponse(server: Server): ServerResponse {
     channelCreationPolicy: server.channelCreationPolicy,
     memberInviteToggle: server.memberInviteToggle,
     createdAt: server.createdAt.toISOString(),
+  };
+}
+
+/** The shape a membership-role change returns — id serialised per AGENTS.md section 4. */
+interface MembershipResponse {
+  userId: string;
+  role: Membership['role'];
+  joinedAt: string;
+}
+
+function toMembershipResponse(membership: Membership): MembershipResponse {
+  return {
+    userId: membership.userId.toString(),
+    role: membership.role,
+    joinedAt: membership.joinedAt.toISOString(),
   };
 }
 
@@ -102,5 +119,23 @@ export class AdministrationController {
     @Param('serverId', ParseSnowflakePipe) serverId: bigint,
   ): Promise<void> {
     await this.administration.deleteServer(serverId);
+  }
+
+  @Patch(':serverId/members/:userId/role')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner')
+  @RateLimit('strict-mutation')
+  async updateMemberRole(
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+    @Param('userId', ParseSnowflakePipe) userId: bigint,
+    @Body() dto: UpdateMemberRoleDto,
+  ): Promise<MembershipResponse> {
+    const membership = await this.administration.updateMemberRole(
+      serverId,
+      userId,
+      dto.role,
+    );
+
+    return toMembershipResponse(membership);
   }
 }
