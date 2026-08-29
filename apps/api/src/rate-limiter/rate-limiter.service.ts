@@ -15,6 +15,14 @@ export interface RateLimitDecision extends RateLimitResult {
    * the policy table a second time to find it.
    */
   limit: number;
+
+  /**
+   * Epoch seconds at which the bucket is back to full capacity, for
+   * `X-RateLimit-Reset`. Computed here rather than in the guard for the same
+   * reason as `limit`: the guard already has `capacity` and `refillPerSecond`
+   * on hand from the same call, so there is no separate policy lookup to do.
+   */
+  resetAt: number;
 }
 
 /**
@@ -46,18 +54,26 @@ export class RateLimiterService {
     cost = 1,
   ): Promise<RateLimitDecision> {
     const { capacity, refillPerSecond } = RATE_LIMIT_POLICIES[policy];
+    // The one place in Huddle the clock is read for rate limiting. Keeping it
+    // here is what lets the store stay clock-free and testable by arithmetic
+    // (see RateLimitRequest.nowMs).
+    const nowMs = Date.now();
 
     const result = await this.store.consume({
       key: buildRateLimitKey(policy, context),
       capacity,
       refillPerSecond,
       cost,
-      // The one place in Huddle the clock is read for rate limiting. Keeping it
-      // here is what lets the store stay clock-free and testable by arithmetic
-      // (see RateLimitRequest.nowMs).
-      nowMs: Date.now(),
+      nowMs,
     });
 
-    return { ...result, limit: capacity };
+    // Time to refill from where the bucket now sits back up to `capacity`.
+    // Whole seconds, rounded up, and never before now: a full bucket already
+    // reports the current second rather than one in the past.
+    const resetAt = Math.ceil(
+      (nowMs + ((capacity - result.remaining) / refillPerSecond) * 1000) / 1000,
+    );
+
+    return { ...result, limit: capacity, resetAt };
   }
 }

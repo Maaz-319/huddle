@@ -79,6 +79,19 @@ describe('RateLimiterService', () => {
     expect(decision.remaining).toBe(RATE_LIMIT_POLICIES.read.capacity - 1);
   });
 
+  it('reports resetAt as the epoch second the bucket is back to full', async () => {
+    const { refillPerSecond } = RATE_LIMIT_POLICIES['strict-mutation'];
+
+    // One token spent out of a full bucket: capacity - remaining is exactly 1.
+    const decision = await service.consume('strict-mutation', {
+      ip: IP,
+      userId: USER_ID,
+    });
+
+    const expectedMs = START_MS + (1 / refillPerSecond) * 1000;
+    expect(decision.resetAt).toBe(Math.ceil(expectedMs / 1000));
+  });
+
   it('reads the clock on every call, so buckets refill without a wait', async () => {
     const capacity = RATE_LIMIT_POLICIES['strict-mutation'].capacity;
     const context = { ip: IP, userId: USER_ID };
