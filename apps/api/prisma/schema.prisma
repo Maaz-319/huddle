@@ -65,9 +65,15 @@ model User {
   avatarUrl String
   email     String
   bio       String?
+  deletedAt DateTime?
 
   // No createdAt, deliberately. Nothing reads a user's join date, and the
   // Snowflake carries the timestamp anyway. See data-model.md section 3.
+  //
+  // deletedAt: soft-delete, not a row delete (see UserRepository's own doc).
+  // SessionAuthGuard rejects any resolved user with this set, which is what
+  // makes account deletion invalidate every other live session for the user
+  // without a userId -> sessionIds index. See auth-service.md section 6.
 
   memberships    Membership[]
   channelMembers ChannelMember[]

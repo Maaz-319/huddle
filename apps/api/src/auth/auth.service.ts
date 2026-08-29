@@ -39,4 +39,9 @@ export class AuthService {
   updateBio(id: bigint, bio: string | null): Promise<User> {
     return this.users.updateBio(id, bio);
   }
+
+  /** Soft-deletes the caller's account. Thin passthrough — see the port's own doc. */
+  markDeleted(id: bigint): Promise<void> {
+    return this.users.markDeleted(id);
+  }
 }

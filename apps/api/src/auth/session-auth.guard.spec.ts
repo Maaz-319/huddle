@@ -39,6 +39,21 @@ describe('SessionAuthGuard', () => {
     ).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
+  it('rejects a session naming a user whose account was deleted', async () => {
+    const created = await users.create({
+      githubId: 'gh-2',
+      username: 'deleted-user',
+      avatarUrl: 'https://example.com/avatar.png',
+      email: 'deleted-user@example.com',
+    });
+    await users.markDeleted(created.id);
+    const request = { session: { userId: created.id.toString() } };
+
+    await expect(
+      guard.canActivate(fakeContext(request)),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('resolves the user and attaches it to the request on a valid session', async () => {
     const created = await users.create({
       githubId: 'gh-1',
