@@ -1,0 +1,99 @@
+import { Injectable } from '@nestjs/common';
+import { NotFoundError } from '../common/errors';
+import { MembershipRepository } from './membership-repository.interface';
+import { Server, ServerRepository } from './server-repository.interface';
+
+/** What a caller supplies to create a server; everything else gets a default. */
+export interface CreateServerRequest {
+  name: string;
+  iconUrl: string | null;
+}
+
+/**
+ * Server/membership orchestration, depending only on the two ports
+ * (AGENTS.md section 2) — no Prisma types belong in this file.
+ */
+@Injectable()
+export class AdministrationService {
+  constructor(
+    private readonly servers: ServerRepository,
+    private readonly memberships: MembershipRepository,
+  ) {}
+
+  /**
+   * Creates a server and seats the caller as its owner, atomically. Defaults
+   * — confirmed with no doc specifying them otherwise — are `everyone` for
+   * channel creation and `true` for the member-invite toggle: a new server
+   * starts maximally open, and the owner tightens it later via #35.
+   */
+  async createServer(
+    ownerId: bigint,
+    request: CreateServerRequest,
+  ): Promise<Server> {
+    const { server } = await this.servers.createWithOwner(
+      {
+        name: request.name,
+        iconUrl: request.iconUrl,
+        channelCreationPolicy: 'everyone',
+        memberInviteToggle: true,
+      },
+      ownerId,
+    );
+
+    return server;
+  }
+
+  /** Every server this user belongs to. */
+  async listMyServers(userId: bigint): Promise<Server[]> {
+    const memberships = await this.memberships.findByUserId(userId);
+
+    const servers = await Promise.all(
+      memberships.map((membership) =>
+        this.servers.findById(membership.serverId),
+      ),
+    );
+
+    // A membership always points at a real server (Restrict, never Cascade,
+    // is the other direction) -- null here would mean the two tables have
+    // drifted, which is a bug, not a case to paper over with a filter.
+    return servers.map((server, index) => {
+      if (server === null) {
+        throw new Error(
+          `Membership names server ${memberships[index].serverId.toString()}, which does not exist`,
+        );
+      }
+
+      return server;
+    });
+  }
+
+  /**
+   * One server's details. Throws `NotFoundError` if the caller is not a
+   * member — servers are not publicly readable, so a non-member learns
+   * nothing about whether the id even exists (404, never 403).
+   */
+  async getServer(serverId: bigint, callerId: bigint): Promise<Server> {
+    const membership = await this.memberships.findByServerAndUser(
+      serverId,
+      callerId,
+    );
+
+    if (membership === null) {
+      throw new NotFoundError('Server not found', {
+        serverId: serverId.toString(),
+      });
+    }
+
+    const server = await this.servers.findById(serverId);
+
+    // Same invariant as listMyServers: a membership always names a real
+    // server, so null here is a data-integrity bug, not a 404 case.
+    if (server === null) {
+      throw new Error(
+        `Membership names server ${serverId.toString()}, which does not exist`,
+      );
+    }
+
+    return server;
+  }
+}
