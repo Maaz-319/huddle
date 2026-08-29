@@ -102,6 +102,8 @@ One real adapter is built per interface now — the interface is what makes a se
 
 **Not wrapped behind an interface:** socket.io. It's the core real-time transport the Chat/Presence/Rate-Limiter modules are built around ([tech-stack.md §3](./tech-stack.md)), not an interchangeable backing store — there's no realistic scenario where it gets swapped independently of a broader transport redesign.
 
+**Also not wrapped behind an interface, decided in Phase 3:** the application session. The `SessionStore` port sketched in section 3 above was never built — instead `express-session` + `connect-redis` is the real, end-to-end session mechanism, wired directly into `AuthModule` via `NestModule.configure()` (`apps/api/src/auth/session.middleware.ts`). Session logic lives partly in Express middleware rather than behind a fully mockable service as a result; a future "log out everywhere" would still need a hand-rolled `userId → sessionIds` index, same as it would have with the port. See [auth-service.md §3](./auth-service.md) for the reasoning.
+
 ---
 
 ## 5. Shared Code
