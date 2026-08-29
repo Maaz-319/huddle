@@ -79,4 +79,33 @@ export class FakeMembershipRepository extends MembershipRepository {
 
     return Promise.resolve({ ...updated });
   }
+
+  transferOwnership(
+    serverId: bigint,
+    fromUserId: bigint,
+    toUserId: bigint,
+  ): Promise<void> {
+    const toKey = membershipKey(serverId, toUserId);
+    const target = this.store.memberships.get(toKey);
+
+    if (target === undefined) {
+      return Promise.reject(
+        new NotFoundError('User is not a member of this server', {
+          serverId: serverId.toString(),
+          userId: toUserId.toString(),
+        }),
+      );
+    }
+
+    const fromKey = membershipKey(serverId, fromUserId);
+    const from = this.store.memberships.get(fromKey);
+
+    if (from !== undefined) {
+      this.store.memberships.set(fromKey, { ...from, role: 'member' });
+    }
+
+    this.store.memberships.set(toKey, { ...target, role: 'owner' });
+
+    return Promise.resolve();
+  }
 }

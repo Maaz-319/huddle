@@ -82,6 +82,38 @@ export class PrismaMembershipRepository extends MembershipRepository {
       throw error;
     }
   }
+
+  async transferOwnership(
+    serverId: bigint,
+    fromUserId: bigint,
+    toUserId: bigint,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const target = await tx.membership.findUnique({
+        where: { serverId_userId: { serverId, userId: toUserId } },
+      });
+
+      if (target === null) {
+        throw new NotFoundError('User is not a member of this server', {
+          serverId: serverId.toString(),
+          userId: toUserId.toString(),
+        });
+      }
+
+      // Demote before promote: the partial unique index only forbids two
+      // owners at once, never zero, so this order is never transiently
+      // invalid the way promote-then-demote would be.
+      await tx.membership.update({
+        where: { serverId_userId: { serverId, userId: fromUserId } },
+        data: { role: 'member' },
+      });
+
+      await tx.membership.update({
+        where: { serverId_userId: { serverId, userId: toUserId } },
+        data: { role: 'owner' },
+      });
+    });
+  }
 }
 
 /** Narrows a caught value to a Prisma error carrying a specific code. */

@@ -62,4 +62,21 @@ export abstract class MembershipRepository {
     userId: bigint,
     role: Extract<Role, 'moderator' | 'member'>,
   ): Promise<Membership>;
+
+  /**
+   * Hands ownership from `fromUserId` to `toUserId`, atomically: the old
+   * owner becomes a plain member, the new owner is seated as owner, in a
+   * single transaction. The partial unique index enforcing exactly one
+   * owner per server (data-model.md section 4.3) is why this can't be two
+   * sequential calls — the demote-then-promote order this method commits to
+   * never transiently holds two owners.
+   *
+   * Throws `NotFoundError` if `toUserId` is not already a member of the
+   * server.
+   */
+  abstract transferOwnership(
+    serverId: bigint,
+    fromUserId: bigint,
+    toUserId: bigint,
+  ): Promise<void>;
 }
