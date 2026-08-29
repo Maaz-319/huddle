@@ -31,7 +31,7 @@ import { UserRepository } from './user-repository.interface';
     GithubStrategy,
     SessionAuthGuard,
   ],
-  exports: [UserRepository],
+  exports: [UserRepository, SessionAuthGuard],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

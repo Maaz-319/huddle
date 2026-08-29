@@ -5,6 +5,7 @@ import { validate } from './common/env.validation';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { RateLimiterModule } from './rate-limiter/rate-limiter.module';
+import { AdministrationModule } from './administration/administration.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { RateLimiterModule } from './rate-limiter/rate-limiter.module';
     HealthModule,
     AuthModule,
     RateLimiterModule,
+    AdministrationModule,
   ],
 })
 export class AppModule {}
