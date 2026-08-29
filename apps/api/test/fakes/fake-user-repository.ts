@@ -70,6 +70,21 @@ export class FakeUserRepository extends UserRepository {
     return Promise.resolve({ ...updated });
   }
 
+  updateBio(id: bigint, bio: string | null): Promise<User> {
+    const existing = this.users.get(id);
+
+    if (existing === undefined) {
+      return Promise.reject(
+        new NotFoundError('User not found', { id: id.toString() }),
+      );
+    }
+
+    const updated: User = { ...existing, bio };
+    this.users.set(id, updated);
+
+    return Promise.resolve({ ...updated });
+  }
+
   /**
    * Hands out a copy, never the stored object. Without this a caller mutating
    * what it got back would silently rewrite the store — a difference from the

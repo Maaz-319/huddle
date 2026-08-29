@@ -48,4 +48,12 @@ describe('AuthService', () => {
     const all = await users.findByGithubId(profile.githubId);
     expect(all?.id).toBe(first.id);
   });
+
+  it('updateBio sets the bio via the repository', async () => {
+    const user = await service.loginWithGithub(profile);
+
+    const updated = await service.updateBio(user.id, 'Hello, world.');
+
+    expect(updated.bio).toBe('Hello, world.');
+  });
 });

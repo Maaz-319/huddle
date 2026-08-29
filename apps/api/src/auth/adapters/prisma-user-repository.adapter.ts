@@ -85,6 +85,23 @@ export class PrismaUserRepository extends UserRepository {
       throw error;
     }
   }
+
+  async updateBio(id: bigint, bio: string | null): Promise<User> {
+    try {
+      const row = await this.prisma.user.update({
+        where: { id },
+        data: { bio },
+      });
+
+      return toUser(row);
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('User not found', { id: id.toString() });
+      }
+
+      throw error;
+    }
+  }
 }
 
 /**

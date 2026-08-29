@@ -34,4 +34,9 @@ export class AuthService {
 
     return this.users.updateProfile(existing.id, profileSync);
   }
+
+  /** Sets the caller's own bio. Thin passthrough — see the port's own doc. */
+  updateBio(id: bigint, bio: string | null): Promise<User> {
+    return this.users.updateBio(id, bio);
+  }
 }
