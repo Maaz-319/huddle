@@ -4,6 +4,7 @@ import { GithubStrategy } from './adapters/github-oauth.adapter';
 import { PrismaUserRepository } from './adapters/prisma-user-repository.adapter';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { SessionAuthGuard } from './session-auth.guard';
 import { SessionMiddleware } from './session.middleware';
 import { UserRepository } from './user-repository.interface';
 
@@ -28,6 +29,7 @@ import { UserRepository } from './user-repository.interface';
     { provide: UserRepository, useClass: PrismaUserRepository },
     AuthService,
     GithubStrategy,
+    SessionAuthGuard,
   ],
   exports: [UserRepository],
 })
