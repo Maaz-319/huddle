@@ -4,12 +4,14 @@ import {
   ForbiddenError,
   NotFoundError,
   RateLimitedError,
+  UnauthorizedError,
   ValidationError,
 } from './errors';
 
 describe('domain errors', () => {
   const cases: [new (message: string) => DomainError, string, number][] = [
     [ValidationError, 'VALIDATION_FAILED', 400],
+    [UnauthorizedError, 'UNAUTHORIZED', 401],
     [ForbiddenError, 'FORBIDDEN', 403],
     [NotFoundError, 'NOT_FOUND', 404],
     [ConflictError, 'CONFLICT', 409],

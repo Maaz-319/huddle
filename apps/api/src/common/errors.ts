@@ -59,6 +59,12 @@ export class ValidationError extends DomainError {
   readonly status = 400;
 }
 
+/** The caller is not known — no session, or the session names nobody real. */
+export class UnauthorizedError extends DomainError {
+  readonly code = 'UNAUTHORIZED';
+  readonly status = 401;
+}
+
 /** The caller is known but is not allowed to do this. */
 export class ForbiddenError extends DomainError {
   readonly code = 'FORBIDDEN';
