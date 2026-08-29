@@ -22,6 +22,14 @@ export interface CreateServerInput {
   memberInviteToggle: boolean;
 }
 
+/** A partial update to an existing server — every field optional. */
+export interface UpdateServerInput {
+  name?: string;
+  iconUrl?: string | null;
+  channelCreationPolicy?: Server['channelCreationPolicy'];
+  memberInviteToggle?: boolean;
+}
+
 /** The `Membership` seated as part of `createWithOwner` — see that method's doc. */
 export interface OwnerMembership {
   serverId: bigint;
@@ -36,10 +44,6 @@ export interface OwnerMembership {
  * An abstract class, never a TypeScript `interface`: Nest binds DI against a
  * runtime token, and an interface is erased at compile time. See
  * docs/architecture/repo-structure.md section 3.
- *
- * Rename, settings changes, and hard delete are deliberately not here yet —
- * they land with #35, matching how `UserRepository` itself grew across #32
- * and #33 rather than being authored all at once.
  */
 export abstract class ServerRepository {
   /** Provisions a server with no members. Mints the Snowflake id. */
@@ -59,4 +63,14 @@ export abstract class ServerRepository {
 
   /** The server with this id, or `null`. */
   abstract findById(id: bigint): Promise<Server | null>;
+
+  /** Applies a partial update. Throws `NotFoundError` if the id doesn't exist. */
+  abstract update(id: bigint, patch: UpdateServerInput): Promise<Server>;
+
+  /**
+   * Hard-deletes the server. Throws `NotFoundError` if the id doesn't exist.
+   * `Membership`, `Channel`, and `Invite` rows cascade off this at the schema
+   * level (data-model.md section 7) — no app-level cleanup needed here.
+   */
+  abstract delete(id: bigint): Promise<void>;
 }
