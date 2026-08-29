@@ -36,6 +36,11 @@ function stubGithubExchange(fixture: typeof OWNER): void {
     .reply(200, [{ email: fixture.email, primary: true, verified: true }]);
 }
 
+/** The `id` field off a `POST /servers` / `GET /servers/:id` response body. */
+function idOf(body: unknown): string {
+  return (body as { id: string }).id;
+}
+
 function extractState(location: string): string {
   const state = new URL(location).searchParams.get('state');
   if (state === null) throw new Error('No state param on the redirect');
@@ -84,9 +89,23 @@ describe('POST/GET /servers (e2e)', () => {
     // Membership/Server rows this spec created cascade from the User rows
     // that own them via Server's own Cascade — but Membership.user is
     // Restrict, so deleting the Server first, then the Users, is required.
-    await prisma.server.deleteMany({ where: { memberships: { some: { user: { githubId: { in: [String(OWNER.githubId), String(OUTSIDER.githubId)] } } } } } });
+    await prisma.server.deleteMany({
+      where: {
+        memberships: {
+          some: {
+            user: {
+              githubId: {
+                in: [String(OWNER.githubId), String(OUTSIDER.githubId)],
+              },
+            },
+          },
+        },
+      },
+    });
     await prisma.user.deleteMany({
-      where: { githubId: { in: [String(OWNER.githubId), String(OUTSIDER.githubId)] } },
+      where: {
+        githubId: { in: [String(OWNER.githubId), String(OUTSIDER.githubId)] },
+      },
     });
 
     const keys = await redis.keys('huddle:rl:*');
@@ -111,9 +130,10 @@ describe('POST/GET /servers (e2e)', () => {
   it('creates a server, seats the creator as owner, and it appears in GET /servers and GET /servers/:id', async () => {
     const owner = await loggedInAgent(app, OWNER);
 
-    const create = await owner
-      .post('/servers')
-      .send({ name: '  General Chat  ', iconUrl: 'https://example.test/icon.png' });
+    const create = await owner.post('/servers').send({
+      name: '  General Chat  ',
+      iconUrl: 'https://example.test/icon.png',
+    });
 
     expect(create.status).toBe(201);
     expect(create.body).toMatchObject({
@@ -128,7 +148,7 @@ describe('POST/GET /servers (e2e)', () => {
     expect(list.status).toBe(200);
     expect(list.body).toContainEqual(create.body);
 
-    const detail = await owner.get(`/servers/${create.body.id}`);
+    const detail = await owner.get(`/servers/${idOf(create.body)}`);
     expect(detail.status).toBe(200);
     expect(detail.body).toEqual(create.body);
   });
@@ -137,9 +157,11 @@ describe('POST/GET /servers (e2e)', () => {
     const owner = await loggedInAgent(app, OWNER);
     const outsider = await loggedInAgent(app, OUTSIDER);
 
-    const create = await owner.post('/servers').send({ name: 'Private Server' });
+    const create = await owner
+      .post('/servers')
+      .send({ name: 'Private Server' });
 
-    const detail = await outsider.get(`/servers/${create.body.id}`);
+    const detail = await outsider.get(`/servers/${idOf(create.body)}`);
 
     expect(detail.status).toBe(404);
     expect(detail.body).toMatchObject({ error: { code: 'NOT_FOUND' } });
@@ -148,7 +170,9 @@ describe('POST/GET /servers (e2e)', () => {
   it('rejects a server name over 100 characters with a 400', async () => {
     const owner = await loggedInAgent(app, OWNER);
 
-    const response = await owner.post('/servers').send({ name: 'a'.repeat(101) });
+    const response = await owner
+      .post('/servers')
+      .send({ name: 'a'.repeat(101) });
 
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({

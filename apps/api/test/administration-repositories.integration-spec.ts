@@ -94,18 +94,21 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
     return servers;
   });
 
-  describeMembershipRepositoryContract('PrismaMembershipRepository', async () => {
-    await truncateAll(prisma);
-    // Membership.userId/serverId are real foreign keys, unlike the fake, so
-    // every id the contract's cases use has to actually exist first.
-    await prisma.user.createMany({
-      data: [userFixture(USER_ID), userFixture(OTHER_USER_ID)],
-    });
-    await prisma.server.createMany({
-      data: [serverFixture(SERVER_ID), serverFixture(OTHER_SERVER_ID)],
-    });
-    return memberships;
-  });
+  describeMembershipRepositoryContract(
+    'PrismaMembershipRepository',
+    async () => {
+      await truncateAll(prisma);
+      // Membership.userId/serverId are real foreign keys, unlike the fake, so
+      // every id the contract's cases use has to actually exist first.
+      await prisma.user.createMany({
+        data: [userFixture(USER_ID), userFixture(OTHER_USER_ID)],
+      });
+      await prisma.server.createMany({
+        data: [serverFixture(SERVER_ID), serverFixture(OTHER_SERVER_ID)],
+      });
+      return memberships;
+    },
+  );
 
   describe('behaviour that needs a real database', () => {
     beforeEach(async () => {
