@@ -56,4 +56,13 @@ describe('AuthService', () => {
 
     expect(updated.bio).toBe('Hello, world.');
   });
+
+  it('markDeleted soft-deletes via the repository', async () => {
+    const user = await service.loginWithGithub(profile);
+
+    await service.markDeleted(user.id);
+
+    const found = await users.findById(user.id);
+    expect(found?.deletedAt).toBeInstanceOf(Date);
+  });
 });
