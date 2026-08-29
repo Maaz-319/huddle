@@ -1,8 +1,9 @@
-import { ConflictError } from '../../src/common/errors';
+import { ConflictError, NotFoundError } from '../../src/common/errors';
 import {
   CreateMembershipInput,
   Membership,
   MembershipRepository,
+  Role,
 } from '../../src/administration/membership-repository.interface';
 import {
   FakeAdministrationStore,
@@ -54,5 +55,28 @@ export class FakeMembershipRepository extends MembershipRepository {
     );
 
     return Promise.resolve(membership === undefined ? null : { ...membership });
+  }
+
+  updateRole(
+    serverId: bigint,
+    userId: bigint,
+    role: Extract<Role, 'moderator' | 'member'>,
+  ): Promise<Membership> {
+    const key = membershipKey(serverId, userId);
+    const existing = this.store.memberships.get(key);
+
+    if (existing === undefined) {
+      return Promise.reject(
+        new NotFoundError('User is not a member of this server', {
+          serverId: serverId.toString(),
+          userId: userId.toString(),
+        }),
+      );
+    }
+
+    const updated: Membership = { ...existing, role };
+    this.store.memberships.set(key, updated);
+
+    return Promise.resolve({ ...updated });
   }
 }

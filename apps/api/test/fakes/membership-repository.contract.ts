@@ -2,7 +2,7 @@ import {
   CreateMembershipInput,
   MembershipRepository,
 } from '../../src/administration/membership-repository.interface';
-import { ConflictError } from '../../src/common/errors';
+import { ConflictError, NotFoundError } from '../../src/common/errors';
 
 /**
  * Fixed ids the contract's cases key off. The Prisma integration spec seeds
@@ -96,6 +96,45 @@ export function describeMembershipRepositoryContract(
         await expect(
           memberships.findByServerAndUser(SERVER_ID, USER_ID),
         ).resolves.toBeNull();
+      });
+    });
+
+    describe('updateRole', () => {
+      it('promotes a member to moderator', async () => {
+        await memberships.create(MEMBER);
+
+        const updated = await memberships.updateRole(
+          SERVER_ID,
+          USER_ID,
+          'moderator',
+        );
+
+        expect(updated).toMatchObject({
+          serverId: SERVER_ID,
+          userId: USER_ID,
+          role: 'moderator',
+        });
+        await expect(
+          memberships.findByServerAndUser(SERVER_ID, USER_ID),
+        ).resolves.toMatchObject({ role: 'moderator' });
+      });
+
+      it('demotes a moderator back to member', async () => {
+        await memberships.create({ ...MEMBER, role: 'moderator' });
+
+        const updated = await memberships.updateRole(
+          SERVER_ID,
+          USER_ID,
+          'member',
+        );
+
+        expect(updated).toMatchObject({ role: 'member' });
+      });
+
+      it('rejects a user who is not a member of the server', async () => {
+        await expect(
+          memberships.updateRole(SERVER_ID, USER_ID, 'moderator'),
+        ).rejects.toBeInstanceOf(NotFoundError);
       });
     });
   });

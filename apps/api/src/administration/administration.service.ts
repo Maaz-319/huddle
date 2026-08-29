@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { NotFoundError } from '../common/errors';
-import { MembershipRepository } from './membership-repository.interface';
+import { NotFoundError, ValidationError } from '../common/errors';
+import {
+  Membership,
+  MembershipRepository,
+} from './membership-repository.interface';
 import {
   Server,
   ServerRepository,
@@ -115,5 +118,42 @@ export class AdministrationService {
   /** Hard-deletes the server. Same authorization note as `updateServer`. */
   async deleteServer(serverId: bigint): Promise<void> {
     await this.servers.delete(serverId);
+  }
+
+  /**
+   * Promotes/demotes a member between `moderator` and `member`. Authorization
+   * (owner-only) already happened in `RequireRoleGuard`.
+   *
+   * The server's current owner can never be "demoted" through this route —
+   * that would silently create a zero-owner server without going through
+   * `transferOwnership`'s safeguards — so this checks the target's current
+   * role rather than trusting the guard alone, which only confirms the
+   * *caller* is the owner.
+   */
+  async updateMemberRole(
+    serverId: bigint,
+    targetUserId: bigint,
+    role: 'moderator' | 'member',
+  ): Promise<Membership> {
+    const target = await this.memberships.findByServerAndUser(
+      serverId,
+      targetUserId,
+    );
+
+    if (target === null) {
+      throw new NotFoundError('User is not a member of this server', {
+        serverId: serverId.toString(),
+        userId: targetUserId.toString(),
+      });
+    }
+
+    if (target.role === 'owner') {
+      throw new ValidationError(
+        "Cannot change the server owner's role through this route",
+        { serverId: serverId.toString(), userId: targetUserId.toString() },
+      );
+    }
+
+    return this.memberships.updateRole(serverId, targetUserId, role);
   }
 }
