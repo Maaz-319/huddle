@@ -184,5 +184,41 @@ export function describeUserRepositoryContract(
         ).rejects.toBeInstanceOf(NotFoundError);
       });
     });
+
+    describe('markDeleted', () => {
+      it('sets deletedAt and persists it', async () => {
+        const created = await users.create(OCTOCAT);
+        expect(created.deletedAt).toBeNull();
+
+        await users.markDeleted(created.id);
+
+        const found = await users.findById(created.id);
+        expect(found?.deletedAt).toBeInstanceOf(Date);
+      });
+
+      it('leaves every other field untouched', async () => {
+        const created = await users.create(OCTOCAT);
+
+        await users.markDeleted(created.id);
+
+        const found = await users.findById(created.id);
+        expect(found).toMatchObject({ ...OCTOCAT, bio: null });
+      });
+
+      it('does not touch anyone else', async () => {
+        const octocat = await users.create(OCTOCAT);
+        const hubot = await users.create(HUBOT);
+
+        await users.markDeleted(octocat.id);
+
+        await expect(users.findById(hubot.id)).resolves.toEqual(hubot);
+      });
+
+      it('rejects an id nobody holds', async () => {
+        await expect(
+          users.markDeleted(999000000000000001n),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
   });
 }

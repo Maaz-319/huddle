@@ -17,6 +17,7 @@ export interface User {
   avatarUrl: string;
   email: string;
   bio: string | null;
+  deletedAt: Date | null;
 }
 
 /**
@@ -50,8 +51,9 @@ export type ProfileSync = Omit<UserProfile, 'githubId'>;
  * There is deliberately no `delete`. Every foreign key pointing at `User` is
  * `Restrict` (docs/architecture/data-model.md section 7), and account deletion
  * revokes access while preserving message history
- * (docs/architecture/auth-service.md section 6) — it is not a row delete. What
- * revocation calls is Phase 3's decision.
+ * (docs/architecture/auth-service.md section 6) — it is not a row delete.
+ * `markDeleted` below is that revocation: a soft-delete marker, never a row
+ * delete.
  */
 export abstract class UserRepository {
   /** The user with this id, or `null`. */
@@ -84,4 +86,14 @@ export abstract class UserRepository {
    * `null` clears it. Throws `NotFoundError` if no such user exists.
    */
   abstract updateBio(id: bigint, bio: string | null): Promise<User>;
+
+  /**
+   * Soft-deletes: sets `deletedAt = now()`. Never a row delete — see the
+   * port's own doc above. `SessionAuthGuard` rejects any resolved user with
+   * this set, which is what makes this invalidate every other live session
+   * for the user without a session index.
+   *
+   * Throws `NotFoundError` if no such user exists.
+   */
+  abstract markDeleted(id: bigint): Promise<void>;
 }

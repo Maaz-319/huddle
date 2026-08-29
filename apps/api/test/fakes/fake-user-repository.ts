@@ -49,7 +49,12 @@ export class FakeUserRepository extends UserRepository {
       }
     }
 
-    const user: User = { id: this.nextId++, bio: null, ...profile };
+    const user: User = {
+      id: this.nextId++,
+      bio: null,
+      deletedAt: null,
+      ...profile,
+    };
     this.users.set(user.id, user);
 
     return Promise.resolve({ ...user });
@@ -83,6 +88,20 @@ export class FakeUserRepository extends UserRepository {
     this.users.set(id, updated);
 
     return Promise.resolve({ ...updated });
+  }
+
+  markDeleted(id: bigint): Promise<void> {
+    const existing = this.users.get(id);
+
+    if (existing === undefined) {
+      return Promise.reject(
+        new NotFoundError('User not found', { id: id.toString() }),
+      );
+    }
+
+    this.users.set(id, { ...existing, deletedAt: new Date() });
+
+    return Promise.resolve();
   }
 
   /**

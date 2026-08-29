@@ -102,6 +102,21 @@ export class PrismaUserRepository extends UserRepository {
       throw error;
     }
   }
+
+  async markDeleted(id: bigint): Promise<void> {
+    try {
+      await this.prisma.user.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('User not found', { id: id.toString() });
+      }
+
+      throw error;
+    }
+  }
 }
 
 /**
@@ -130,5 +145,6 @@ function toUser(row: UserRow): User {
     avatarUrl: row.avatarUrl,
     email: row.email,
     bio: row.bio,
+    deletedAt: row.deletedAt,
   };
 }
