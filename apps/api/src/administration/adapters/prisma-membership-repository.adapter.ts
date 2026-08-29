@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ConflictError } from '../../common/errors';
+import { ConflictError, NotFoundError } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
 import {
   Membership as MembershipRow,
@@ -9,10 +9,14 @@ import {
   CreateMembershipInput,
   Membership,
   MembershipRepository,
+  Role,
 } from '../membership-repository.interface';
 
 /** Prisma's code for a unique-constraint violation. */
 const UNIQUE_VIOLATION = 'P2002';
+
+/** Prisma's code for "the record to update/delete was not found". */
+const RECORD_NOT_FOUND = 'P2025';
 
 /** Postgres-backed `MembershipRepository`, via Prisma. */
 @Injectable()
@@ -53,6 +57,30 @@ export class PrismaMembershipRepository extends MembershipRepository {
     });
 
     return row === null ? null : toMembership(row);
+  }
+
+  async updateRole(
+    serverId: bigint,
+    userId: bigint,
+    role: Extract<Role, 'moderator' | 'member'>,
+  ): Promise<Membership> {
+    try {
+      const row = await this.prisma.membership.update({
+        where: { serverId_userId: { serverId, userId } },
+        data: { role },
+      });
+
+      return toMembership(row);
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('User is not a member of this server', {
+          serverId: serverId.toString(),
+          userId: userId.toString(),
+        });
+      }
+
+      throw error;
+    }
   }
 }
 

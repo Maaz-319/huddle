@@ -49,4 +49,17 @@ export abstract class MembershipRepository {
     serverId: bigint,
     userId: bigint,
   ): Promise<Membership | null>;
+
+  /**
+   * Changes an existing member's role. Typed to exclude `'owner'` — promoting
+   * a member *to* owner is ownership transfer, with its own safeguards, not a
+   * plain role edit.
+   *
+   * Throws `NotFoundError` if the user is not a member of that server.
+   */
+  abstract updateRole(
+    serverId: bigint,
+    userId: bigint,
+    role: Extract<Role, 'moderator' | 'member'>,
+  ): Promise<Membership>;
 }
