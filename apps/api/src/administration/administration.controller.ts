@@ -1,5 +1,17 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { RequireRole } from '../auth/require-role.decorator';
+import { RequireRoleGuard } from '../auth/require-role.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import type { User } from '../auth/user-repository.interface';
 import { ParseSnowflakePipe } from '../common/parse-snowflake.pipe';
@@ -7,6 +19,7 @@ import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import { CreateServerDto } from './create-server.dto';
 import type { Server } from './server-repository.interface';
+import { UpdateServerDto } from './update-server.dto';
 
 /** The shape every server route returns — a `Server`, id serialised per AGENTS.md section 4. */
 interface ServerResponse {
@@ -65,5 +78,29 @@ export class AdministrationController {
     const server = await this.administration.getServer(serverId, user.id);
 
     return toServerResponse(server);
+  }
+
+  @Patch(':serverId')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner')
+  @RateLimit('strict-mutation')
+  async updateServer(
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+    @Body() dto: UpdateServerDto,
+  ): Promise<ServerResponse> {
+    const server = await this.administration.updateServer(serverId, dto);
+
+    return toServerResponse(server);
+  }
+
+  @Delete(':serverId')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner')
+  @RateLimit('strict-mutation')
+  @HttpCode(204)
+  async deleteServer(
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+  ): Promise<void> {
+    await this.administration.deleteServer(serverId);
   }
 }

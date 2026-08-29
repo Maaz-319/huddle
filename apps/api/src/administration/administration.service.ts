@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '../common/errors';
 import { MembershipRepository } from './membership-repository.interface';
-import { Server, ServerRepository } from './server-repository.interface';
+import {
+  Server,
+  ServerRepository,
+  UpdateServerInput,
+} from './server-repository.interface';
 
 /** What a caller supplies to create a server; everything else gets a default. */
 export interface CreateServerRequest {
@@ -95,5 +99,21 @@ export class AdministrationService {
     }
 
     return server;
+  }
+
+  /**
+   * Applies a partial update. Authorization (owner-only) already happened in
+   * `RequireRoleGuard` — this method does not re-check the caller's role.
+   */
+  async updateServer(
+    serverId: bigint,
+    patch: UpdateServerInput,
+  ): Promise<Server> {
+    return this.servers.update(serverId, patch);
+  }
+
+  /** Hard-deletes the server. Same authorization note as `updateServer`. */
+  async deleteServer(serverId: bigint): Promise<void> {
+    await this.servers.delete(serverId);
   }
 }

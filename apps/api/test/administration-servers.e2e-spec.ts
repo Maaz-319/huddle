@@ -187,4 +187,62 @@ describe('POST/GET /servers (e2e)', () => {
 
     expect(response.status).toBe(404);
   });
+
+  it('lets the owner rename, update settings, and delete their server', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+
+    const create = await owner.post('/servers').send({ name: 'Original' });
+
+    const rename = await owner
+      .patch(`/servers/${idOf(create.body)}`)
+      .send({ name: 'Renamed', channelCreationPolicy: 'owner_only' });
+
+    expect(rename.status).toBe(200);
+    expect(rename.body).toMatchObject({
+      name: 'Renamed',
+      channelCreationPolicy: 'owner_only',
+    });
+
+    const del = await owner.delete(`/servers/${idOf(create.body)}`);
+    expect(del.status).toBe(204);
+
+    const afterDelete = await owner.get(`/servers/${idOf(create.body)}`);
+    expect(afterDelete.status).toBe(404);
+  });
+
+  it('rejects a plain member on rename/update-settings/delete with 403', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+    const outsider = await loggedInAgent(app, OUTSIDER);
+
+    const create = await owner.post('/servers').send({ name: 'Shared' });
+
+    const outsiderUser = await prisma.user.findUniqueOrThrow({
+      where: { githubId: String(OUTSIDER.githubId) },
+    });
+    await prisma.membership.create({
+      data: {
+        serverId: BigInt(idOf(create.body)),
+        userId: outsiderUser.id,
+        role: 'member',
+      },
+    });
+
+    const rename = await outsider
+      .patch(`/servers/${idOf(create.body)}`)
+      .send({ name: 'Hijacked' });
+    expect(rename.status).toBe(403);
+    expect(rename.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+
+    const del = await outsider.delete(`/servers/${idOf(create.body)}`);
+    expect(del.status).toBe(403);
+    expect(del.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+  });
+
+  it('rejects DELETE for a server id nobody holds with 404', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+
+    const response = await owner.delete('/servers/999000000000000001');
+
+    expect(response.status).toBe(404);
+  });
 });
