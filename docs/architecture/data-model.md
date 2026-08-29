@@ -248,6 +248,8 @@ erDiagram
 
 **Closed:** ~~Full Prisma schema syntax~~ — settled in `apps/api/prisma/schema.prisma`, applied by migration `20260823150824_init`.
 
+**Closed (amendment):** `User.deletedAt DateTime?`, added in Phase 3 (#33) for logout/account deletion. This is the one approved exception to "the schema is authored once, in full, in Phase 1" — added by a generated migration, never hand-edited, per AGENTS.md section 8. It is a soft-delete marker, not a row delete: `Restrict` on every relation pointing at `User` (below) already means a hard delete was never an option, and `SessionAuthGuard` rejecting any resolved user with `deletedAt` set is what makes account deletion invalidate every other live session for that user, without needing the `userId → sessionIds` secondary index [auth-service.md §5](./auth-service.md) defers to a future enhancement. See [auth-service.md §6](./auth-service.md).
+
 The partial unique index in §4.3 uses Prisma's **`partialIndexes` preview feature**, which is available on Prisma 7.9.1:
 
 ```prisma
