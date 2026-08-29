@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Patch,
+  Post,
   Req,
   Res,
   UseGuards,
@@ -36,6 +38,27 @@ function toMeResponse(user: User): MeResponse {
     email: user.email,
     bio: user.bio,
   };
+}
+
+/**
+ * Destroys the current session and clears its cookie — the one thing
+ * `POST /auth/logout` and `DELETE /auth/me` both end with. `express-session`
+ * sets no custom cookie `name` in `SessionMiddleware`, so this is its own
+ * default, `connect.sid`.
+ */
+function endSession(req: Request, res: Response): Promise<void> {
+  return new Promise((resolve, reject) => {
+    req.session.destroy((error) => {
+      if (error) {
+        reject(error as Error);
+        return;
+      }
+
+      res.clearCookie('connect.sid');
+      res.status(204).send();
+      resolve();
+    });
+  });
 }
 
 @Controller('auth')
@@ -102,5 +125,35 @@ export class AuthController {
 
     const updated = await this.authService.updateBio(user.id, dto.bio);
     return toMeResponse(updated);
+  }
+
+  /**
+   * Logs out this device/browser only — destroys the current session.
+   * "Log out everywhere" stays a documented future enhancement
+   * (auth-service.md section 5), unchanged by this route.
+   */
+  @Post('logout')
+  @UseGuards(SessionAuthGuard)
+  @RateLimit('read')
+  logout(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return endSession(req, res);
+  }
+
+  /**
+   * Soft-deletes the caller's account, then ends the current session.
+   * `SessionAuthGuard` rejects any other live session for this user the next
+   * time it is used — see the guard's own doc for why that needs no session
+   * index.
+   */
+  @Delete('me')
+  @UseGuards(SessionAuthGuard)
+  @RateLimit('strict-mutation')
+  async deleteMe(
+    @CurrentUser() user: User,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.authService.markDeleted(user.id);
+    await endSession(req, res);
   }
 }
