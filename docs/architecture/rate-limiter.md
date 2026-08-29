@@ -46,7 +46,7 @@ No global cross-route backstop per user — per-route buckets are the only cap.
 
 **What "IP" means.** Behind a TLS-terminating proxy ([tech-stack.md §9](./tech-stack.md) puts the backend on Render) the socket address is the proxy's, so every caller would land in one shared bucket and rate-limit each other. The client address is resolved through Express's `trust proxy` with an explicit, configured hop count — never `true`, which would let any client forge `X-Forwarded-For` and mint itself an unlimited supply of fresh buckets.
 
-**Temporary, until Phase 3.** A user-dimensioned bucket has no caller id to key on before sessions exist, so it falls back to the per-IP dimension rather than going unlimited. Remove this note once identity resolution lands.
+**No session, no user id.** A user-dimensioned bucket with no caller id (an authenticated route hit with no session) falls back to the per-IP dimension rather than going unlimited.
 
 ---
 

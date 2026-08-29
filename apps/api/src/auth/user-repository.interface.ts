@@ -75,4 +75,13 @@ export abstract class UserRepository {
    * Throws `NotFoundError` if no such user exists.
    */
   abstract updateProfile(id: bigint, profile: ProfileSync): Promise<User>;
+
+  /**
+   * Sets the user's own bio, the one profile field GitHub does not own.
+   * Deliberately separate from `updateProfile` — that method is exactly the
+   * GitHub-synced fields, and `bio` is exactly not one of them.
+   *
+   * `null` clears it. Throws `NotFoundError` if no such user exists.
+   */
+  abstract updateBio(id: bigint, bio: string | null): Promise<User>;
 }

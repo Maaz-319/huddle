@@ -149,5 +149,40 @@ export function describeUserRepositoryContract(
         ).rejects.toBeInstanceOf(NotFoundError);
       });
     });
+
+    describe('updateBio', () => {
+      it('sets the bio and persists it', async () => {
+        const created = await users.create(OCTOCAT);
+
+        const updated = await users.updateBio(created.id, 'Hello, world.');
+
+        expect(updated.bio).toBe('Hello, world.');
+        await expect(users.findById(created.id)).resolves.toEqual(updated);
+      });
+
+      it('clears the bio with null', async () => {
+        const created = await users.create(OCTOCAT);
+        await users.updateBio(created.id, 'Hello, world.');
+
+        const cleared = await users.updateBio(created.id, null);
+
+        expect(cleared.bio).toBeNull();
+      });
+
+      it('does not touch anyone else', async () => {
+        const octocat = await users.create(OCTOCAT);
+        const hubot = await users.create(HUBOT);
+
+        await users.updateBio(octocat.id, 'Hello, world.');
+
+        await expect(users.findById(hubot.id)).resolves.toEqual(hubot);
+      });
+
+      it('rejects an id nobody holds', async () => {
+        await expect(
+          users.updateBio(999000000000000001n, 'Hello, world.'),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
   });
 }
