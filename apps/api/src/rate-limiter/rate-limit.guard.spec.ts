@@ -33,6 +33,7 @@ function fakeContext(
   target: object,
   handlerName: string,
   response: { setHeader: jest.Mock },
+  sessionUserId?: string,
 ): ExecutionContext {
   const handler = (target as Record<string, () => void>)[handlerName];
 
@@ -40,7 +41,7 @@ function fakeContext(
     getHandler: () => handler,
     getClass: () => target.constructor,
     switchToHttp: () => ({
-      getRequest: () => ({ ip: IP }),
+      getRequest: () => ({ ip: IP, session: { userId: sessionUserId } }),
       getResponse: () => response,
     }),
   } as unknown as ExecutionContext;
@@ -120,6 +121,21 @@ describe('RateLimitGuard', () => {
       expect(error).toBeInstanceOf(RateLimitedError);
       expect((error as RateLimitedError).retryAfter).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it('keys a user-dimensioned policy on the session userId, not the IP', async () => {
+    const spend = jest.spyOn(store, 'consume');
+    const instance = new ClassPolicyController();
+
+    await guard.canActivate(
+      fakeContext(instance, 'handler', response, '300000000000000001'),
+    );
+
+    expect(spend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: expect.stringContaining(':user:300000000000000001') as string,
+      }),
+    );
   });
 
   it('lets a handler-level policy override the class-level one', async () => {

@@ -22,15 +22,10 @@ export interface RateLimitContext {
   ip: string;
 
   /**
-   * The authenticated caller, when there is one.
-   *
-   * Optional because sessions do not exist until Phase 3. A user-dimensioned
-   * policy with no caller id falls back to the IP dimension below rather than
-   * going unlimited. That fallback is a deliberate placeholder, not an
-   * oversight: Phase 3 owns identity resolution, and nothing here may guess at
-   * a session shape or read a cookie to get ahead of it. Once sessions land,
-   * this stops being absent on an authenticated route and the fallback stops
-   * firing on its own.
+   * The authenticated caller, when there is one — absent on a route nobody is
+   * logged into (the OAuth routes themselves, or any request with no session
+   * cookie at all). A user-dimensioned policy with no caller id falls back to
+   * the IP dimension below rather than going unlimited.
    */
   userId?: bigint;
 
@@ -65,11 +60,10 @@ function resolveDimension(
 
   if (dimension === 'channel') {
     if (context.channelId === undefined) {
-      // No Phase 3-style excuse exists here: a per-channel policy is only ever
-      // applied to something that already knows its channel, so an absent id is
-      // a wiring bug. Falling back would quietly merge every channel into one
-      // bucket and still return plausible 429s, which is the version of this
-      // failure nobody notices.
+      // A per-channel policy is only ever applied to something that already
+      // knows its channel, so an absent id is a wiring bug. Falling back
+      // would quietly merge every channel into one bucket and still return
+      // plausible 429s, which is the version of this failure nobody notices.
       throw new Error(
         `Rate limit policy '${name}' is per-channel but no channelId was supplied`,
       );
@@ -88,7 +82,7 @@ function resolveDimension(
     );
   }
 
-  // Either the policy is per-IP, or it is per-user and Phase 3 has not landed
-  // yet. See RateLimitContext.userId.
+  // Either the policy is per-IP, or it is per-user and the caller has no
+  // session. See RateLimitContext.userId.
   return { dimension: 'ip', id: context.ip };
 }

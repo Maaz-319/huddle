@@ -40,11 +40,20 @@ export class RateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
 
-    // No session yet (Phase 3) and no REST route is channel-dimensioned today
-    // (message-send is WS-only, Phase 8) — the address is all there is to
-    // build a context from. See RateLimitContext.userId.
+    // Read straight off the session, not `req.user` — `RateLimitGuard` is a
+    // global `APP_GUARD` and therefore always runs before any route-scoped
+    // guard like `SessionAuthGuard`, so `req.user` is never populated yet at
+    // this point. `express-session` middleware, unlike a guard, always runs
+    // ahead of every guard, so the session itself is reliably present here on
+    // any route the session middleware covers (all of them, `AuthModule`
+    // section 3). No REST route is channel-dimensioned today either
+    // (message-send is WS-only, Phase 8) — ip and userId are all there is to
+    // build a context from.
+    const rawUserId = request.session.userId;
+
     const decision = await this.rateLimiter.consume(policy, {
       ip: request.ip ?? '',
+      userId: rawUserId === undefined ? undefined : BigInt(rawUserId),
     });
 
     response.setHeader('X-RateLimit-Limit', decision.limit);
