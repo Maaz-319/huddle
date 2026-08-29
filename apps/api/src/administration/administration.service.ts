@@ -156,4 +156,24 @@ export class AdministrationService {
 
     return this.memberships.updateRole(serverId, targetUserId, role);
   }
+
+  /**
+   * Hands ownership from the caller to an existing member, unilaterally and
+   * immediately — no acceptance step (administration-service.md section 3).
+   * Authorization (owner-only) already happened in `RequireRoleGuard`.
+   */
+  async transferOwnership(
+    serverId: bigint,
+    fromUserId: bigint,
+    toUserId: bigint,
+  ): Promise<void> {
+    if (fromUserId === toUserId) {
+      throw new ValidationError('Cannot transfer ownership to yourself', {
+        serverId: serverId.toString(),
+        userId: toUserId.toString(),
+      });
+    }
+
+    await this.memberships.transferOwnership(serverId, fromUserId, toUserId);
+  }
 }

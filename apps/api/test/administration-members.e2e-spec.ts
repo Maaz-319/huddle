@@ -264,3 +264,123 @@ describe('PATCH /servers/:serverId/members/:userId/role (e2e)', () => {
     });
   });
 });
+
+describe('POST /servers/:serverId/transfer-ownership (e2e)', () => {
+  let app: INestApplication<App>;
+  let prisma: PrismaService;
+  let redis: RedisService;
+  let snowflakes: SnowflakeService;
+
+  beforeAll(async () => {
+    nock.disableNetConnect();
+    nock.enableNetConnect('127.0.0.1');
+
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    prisma = moduleFixture.get(PrismaService);
+    redis = moduleFixture.get(RedisService);
+    snowflakes = moduleFixture.get(SnowflakeService);
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    nock.enableNetConnect();
+  });
+
+  afterEach(async () => {
+    const githubIds = FIXTURES.map((f) => String(f.githubId));
+
+    await prisma.server.deleteMany({
+      where: {
+        memberships: { some: { user: { githubId: { in: githubIds } } } },
+      },
+    });
+    await prisma.user.deleteMany({
+      where: { githubId: { in: githubIds } },
+    });
+
+    const keys = await redis.keys('huddle:rl:*');
+    if (keys.length > 0) await redis.del(...keys);
+
+    nock.cleanAll();
+  });
+
+  it('lets the owner hand ownership to a member, who can then act as owner while the old owner cannot', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+    const member = await loggedInAgent(app, MEMBER);
+
+    const create = await owner.post('/servers').send({ name: 'Handoff' });
+    const serverId = idOf(create.body);
+
+    const memberUser = await prisma.user.findUniqueOrThrow({
+      where: { githubId: String(MEMBER.githubId) },
+    });
+    await prisma.membership.create({
+      data: {
+        serverId: BigInt(serverId),
+        userId: memberUser.id,
+        role: 'member',
+      },
+    });
+
+    const transfer = await owner
+      .post(`/servers/${serverId}/transfer-ownership`)
+      .send({ toUserId: memberUser.id.toString() });
+
+    expect(transfer.status).toBe(204);
+
+    const rename = await member
+      .patch(`/servers/${serverId}`)
+      .send({ name: 'Renamed by new owner' });
+
+    expect(rename.status).toBe(200);
+    expect(rename.body).toMatchObject({ name: 'Renamed by new owner' });
+
+    const forbidden = await owner
+      .patch(`/servers/${serverId}`)
+      .send({ name: 'Old owner tries again' });
+
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+  });
+
+  it('rejects transferring to a non-member with 404', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+
+    const create = await owner.post('/servers').send({ name: 'Exclusive' });
+    const serverId = idOf(create.body);
+
+    const outsiderUser = await createPassiveUser(prisma, snowflakes, MEMBER);
+
+    const response = await owner
+      .post(`/servers/${serverId}/transfer-ownership`)
+      .send({ toUserId: outsiderUser.id.toString() });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it('rejects transferring to yourself with 400', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+
+    const create = await owner.post('/servers').send({ name: 'Solo' });
+    const serverId = idOf(create.body);
+
+    const ownerUser = await prisma.user.findUniqueOrThrow({
+      where: { githubId: String(OWNER.githubId) },
+    });
+
+    const response = await owner
+      .post(`/servers/${serverId}/transfer-ownership`)
+      .send({ toUserId: ownerUser.id.toString() });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: { code: 'VALIDATION_FAILED' },
+    });
+  });
+});

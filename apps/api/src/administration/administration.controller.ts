@@ -20,6 +20,7 @@ import { AdministrationService } from './administration.service';
 import { CreateServerDto } from './create-server.dto';
 import type { Membership } from './membership-repository.interface';
 import type { Server } from './server-repository.interface';
+import { TransferOwnershipDto } from './transfer-ownership.dto';
 import { UpdateMemberRoleDto } from './update-member-role.dto';
 import { UpdateServerDto } from './update-server.dto';
 
@@ -137,5 +138,22 @@ export class AdministrationController {
     );
 
     return toMembershipResponse(membership);
+  }
+
+  @Post(':serverId/transfer-ownership')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner')
+  @RateLimit('strict-mutation')
+  @HttpCode(204)
+  async transferOwnership(
+    @CurrentUser() user: User,
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+    @Body() dto: TransferOwnershipDto,
+  ): Promise<void> {
+    await this.administration.transferOwnership(
+      serverId,
+      user.id,
+      dto.toUserId,
+    );
   }
 }
