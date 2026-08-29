@@ -1,3 +1,6 @@
+/** A server's authority roles, from loosest to tightest capability. */
+export type Role = 'owner' | 'moderator' | 'member';
+
 /**
  * A user's membership in a server: the join row plus their role. Declared
  * here rather than re-exported from Prisma, same reasoning as
@@ -6,7 +9,7 @@
 export interface Membership {
   serverId: bigint;
   userId: bigint;
-  role: 'owner' | 'moderator' | 'member';
+  role: Role;
   joinedAt: Date;
 }
 

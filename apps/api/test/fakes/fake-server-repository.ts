@@ -3,7 +3,9 @@ import {
   OwnerMembership,
   Server,
   ServerRepository,
+  UpdateServerInput,
 } from '../../src/administration/server-repository.interface';
+import { NotFoundError } from '../../src/common/errors';
 import {
   FakeAdministrationStore,
   membershipKey,
@@ -67,5 +69,30 @@ export class FakeServerRepository extends ServerRepository {
     const server = this.store.servers.get(id);
 
     return Promise.resolve(server === undefined ? null : { ...server });
+  }
+
+  update(id: bigint, patch: UpdateServerInput): Promise<Server> {
+    const existing = this.store.servers.get(id);
+
+    if (existing === undefined) {
+      return Promise.reject(
+        new NotFoundError('Server not found', { id: id.toString() }),
+      );
+    }
+
+    const updated: Server = { ...existing, ...patch };
+    this.store.servers.set(id, updated);
+
+    return Promise.resolve({ ...updated });
+  }
+
+  delete(id: bigint): Promise<void> {
+    if (!this.store.servers.delete(id)) {
+      return Promise.reject(
+        new NotFoundError('Server not found', { id: id.toString() }),
+      );
+    }
+
+    return Promise.resolve();
   }
 }

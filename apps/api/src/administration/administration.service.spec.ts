@@ -84,4 +84,47 @@ describe('AdministrationService', () => {
       ).rejects.toBeInstanceOf(NotFoundError);
     });
   });
+
+  describe('updateServer', () => {
+    it('applies a partial update', async () => {
+      const server = await service.createServer(OWNER_ID, {
+        name: 'General Chat',
+        iconUrl: null,
+      });
+
+      const updated = await service.updateServer(server.id, {
+        name: 'Renamed',
+      });
+
+      expect(updated.name).toBe('Renamed');
+      expect(updated.channelCreationPolicy).toBe('everyone');
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.updateServer(999000000000000001n, { name: 'Nope' }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('deleteServer', () => {
+    it('removes the server', async () => {
+      const server = await service.createServer(OWNER_ID, {
+        name: 'General Chat',
+        iconUrl: null,
+      });
+
+      await service.deleteServer(server.id);
+
+      await expect(
+        service.updateServer(server.id, { name: 'Anything' }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.deleteServer(999000000000000001n),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
 });

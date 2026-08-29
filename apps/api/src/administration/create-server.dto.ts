@@ -7,7 +7,7 @@ import { IsOptional, IsString, Length } from 'class-validator';
  * documented `≤2048 chars` being the only other string-cap precedent in this
  * schema.
  */
-const NAME_LENGTH = [1, 100] as const;
+export const NAME_LENGTH = [1, 100] as const;
 
 /** Body for `POST /servers`. */
 export class CreateServerDto {
