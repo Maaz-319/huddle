@@ -16,10 +16,11 @@ import { UserRepository } from './user-repository.interface';
  * place to read the caller from regardless of how they got there.
  *
  * Rejects with `UnauthorizedError` (401) whenever the caller cannot be
- * resolved: no session, or a session naming a user that no longer exists.
- * There is no `deletedAt` check yet — the `User` model has no such column
- * until #33 adds soft-delete. Once it does, a resolved user with `deletedAt`
- * set must be rejected the same way, right here.
+ * resolved: no session, a session naming a user that no longer exists, or a
+ * user whose `deletedAt` is set. That last case is how account deletion
+ * invalidates every other live session for the user (#33) — there is no
+ * session index to walk, this guard just refuses to resolve a deleted user
+ * the next time any of their sessions is used.
  */
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -37,6 +38,10 @@ export class SessionAuthGuard implements CanActivate {
 
     if (user === null) {
       throw new UnauthorizedError('Session does not name a real user');
+    }
+
+    if (user.deletedAt !== null) {
+      throw new UnauthorizedError('This account has been deleted');
     }
 
     request.user = user;
