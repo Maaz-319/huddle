@@ -1,13 +1,18 @@
 import { Injectable } from '@nestjs/common';
+import { NotFoundError } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
 import { SnowflakeService } from '../../common/snowflake.service';
-import { Server as ServerRow } from '../../generated/prisma/client';
+import { Prisma, Server as ServerRow } from '../../generated/prisma/client';
 import {
   CreateServerInput,
   OwnerMembership,
   Server,
   ServerRepository,
+  UpdateServerInput,
 } from '../server-repository.interface';
+
+/** Prisma's code for "the record to update/delete was not found". */
+const RECORD_NOT_FOUND = 'P2025';
 
 /**
  * Postgres-backed `ServerRepository`, via Prisma.
@@ -70,6 +75,42 @@ export class PrismaServerRepository extends ServerRepository {
 
     return row === null ? null : toServer(row);
   }
+
+  async update(id: bigint, patch: UpdateServerInput): Promise<Server> {
+    try {
+      const row = await this.prisma.server.update({
+        where: { id },
+        data: patch,
+      });
+
+      return toServer(row);
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('Server not found', { id: id.toString() });
+      }
+
+      throw error;
+    }
+  }
+
+  async delete(id: bigint): Promise<void> {
+    try {
+      await this.prisma.server.delete({ where: { id } });
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('Server not found', { id: id.toString() });
+      }
+
+      throw error;
+    }
+  }
+}
+
+/** Narrows a caught value to a Prisma error carrying a specific code. */
+function hasPrismaCode(error: unknown, code: string): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === code
+  );
 }
 
 /**

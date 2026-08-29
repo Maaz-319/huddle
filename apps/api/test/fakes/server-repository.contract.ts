@@ -2,6 +2,7 @@ import {
   CreateServerInput,
   ServerRepository,
 } from '../../src/administration/server-repository.interface';
+import { NotFoundError } from '../../src/common/errors';
 import { isSnowflakeString } from '../../src/common/snowflake.service';
 
 const GENERAL: CreateServerInput = {
@@ -97,6 +98,48 @@ export function describeServerRepositoryContract(
         await servers.create(GENERAL);
 
         await expect(servers.findById(999000000000000001n)).resolves.toBeNull();
+      });
+    });
+
+    describe('update', () => {
+      it('applies a partial update, leaving other fields untouched', async () => {
+        const created = await servers.create(GENERAL);
+
+        const updated = await servers.update(created.id, {
+          name: 'Renamed',
+          channelCreationPolicy: 'owner_only',
+        });
+
+        expect(updated).toMatchObject({
+          id: created.id,
+          name: 'Renamed',
+          channelCreationPolicy: 'owner_only',
+          iconUrl: GENERAL.iconUrl,
+          memberInviteToggle: GENERAL.memberInviteToggle,
+        });
+        await expect(servers.findById(created.id)).resolves.toEqual(updated);
+      });
+
+      it('rejects an id nobody holds', async () => {
+        await expect(
+          servers.update(999000000000000001n, { name: 'Nope' }),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
+
+    describe('delete', () => {
+      it('removes the server, then findById returns null', async () => {
+        const created = await servers.create(GENERAL);
+
+        await servers.delete(created.id);
+
+        await expect(servers.findById(created.id)).resolves.toBeNull();
+      });
+
+      it('rejects an id nobody holds', async () => {
+        await expect(
+          servers.delete(999000000000000001n),
+        ).rejects.toBeInstanceOf(NotFoundError);
       });
     });
   });
