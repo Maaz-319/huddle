@@ -43,6 +43,7 @@ Out of scope (this doc): the RBAC *data model* (role definitions, channel overri
 - **Expiry:** **sliding 7-day window** — each authenticated request/heartbeat extends `expiresAt` by 7 days from now (up to some cap, not yet numerically bounded beyond the 7-day rule). After 7 days of inactivity, the session is gone and the user must re-login.
 - **Expired/invalid session mid-use:** protected endpoints return `401`; the frontend redirects to the login page. No silent re-auth.
 - **CSRF on state-changing requests:** relying on `SameSite=Lax` alone for now. Explicit CSRF tokens on mutating endpoints (POST/PATCH/DELETE) are a deferred hardening step, not built in this phase.
+- **Implementation note (Phase 3):** this is built as `express-session` + `connect-redis` directly, not behind a hand-rolled `SessionStore` port — a deliberate, confirmed exception to the port/adapter convention (`AGENTS.md` §2), the same status as socket.io ([repo-structure.md §4](./repo-structure.md)). `connect-redis`'s `RedisStore` reuses the app's existing injectable Redis connection rather than opening a second one. `rolling: true` on the cookie session is what gives the sliding 7-day expiry above — every request that touches the session pushes `expiresAt` back out, with no separate "touch" logic needed.
 
 ---
 

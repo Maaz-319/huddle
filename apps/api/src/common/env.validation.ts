@@ -59,6 +59,32 @@ export class EnvironmentVariables {
   @Min(0)
   @Max(10)
   TRUSTED_PROXY_HOPS: number = 0;
+
+  /** GitHub OAuth App client id (docs/architecture/auth-service.md section 2). */
+  @IsString()
+  @IsNotEmpty()
+  GITHUB_CLIENT_ID!: string;
+
+  /** GitHub OAuth App client secret. Never logged, never persisted. */
+  @IsString()
+  @IsNotEmpty()
+  GITHUB_CLIENT_SECRET!: string;
+
+  /**
+   * Must exactly match the callback URL registered on the GitHub OAuth App,
+   * or GitHub rejects the redirect outright.
+   */
+  @IsString()
+  @IsNotEmpty()
+  GITHUB_CALLBACK_URL!: string;
+
+  /**
+   * Signs the session cookie. `express-session` throws at first use without
+   * one, so this is required rather than defaulted.
+   */
+  @IsString()
+  @IsNotEmpty()
+  SESSION_SECRET!: string;
 }
 
 /**

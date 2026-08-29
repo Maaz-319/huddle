@@ -7,6 +7,10 @@ const valid = {
   REDIS_URL: 'redis://localhost:6379',
   WEB_ORIGIN: 'http://localhost:5173',
   TRUSTED_PROXY_HOPS: '0',
+  GITHUB_CLIENT_ID: 'test-client-id',
+  GITHUB_CLIENT_SECRET: 'test-client-secret',
+  GITHUB_CALLBACK_URL: 'http://localhost:3000/auth/github/callback',
+  SESSION_SECRET: 'test-session-secret',
 };
 
 describe('validate', () => {
@@ -26,6 +30,28 @@ describe('validate', () => {
 
   it('rejects a missing REDIS_URL, naming it in the message', () => {
     expect(() => validate(omit('REDIS_URL'))).toThrow(/REDIS_URL/);
+  });
+
+  it('rejects a missing GITHUB_CLIENT_ID, naming it in the message', () => {
+    expect(() => validate(omit('GITHUB_CLIENT_ID'))).toThrow(
+      /GITHUB_CLIENT_ID/,
+    );
+  });
+
+  it('rejects a missing GITHUB_CLIENT_SECRET, naming it in the message', () => {
+    expect(() => validate(omit('GITHUB_CLIENT_SECRET'))).toThrow(
+      /GITHUB_CLIENT_SECRET/,
+    );
+  });
+
+  it('rejects a missing GITHUB_CALLBACK_URL, naming it in the message', () => {
+    expect(() => validate(omit('GITHUB_CALLBACK_URL'))).toThrow(
+      /GITHUB_CALLBACK_URL/,
+    );
+  });
+
+  it('rejects a missing SESSION_SECRET, naming it in the message', () => {
+    expect(() => validate(omit('SESSION_SECRET'))).toThrow(/SESSION_SECRET/);
   });
 
   it('rejects an empty DATABASE_URL rather than treating it as absent', () => {
