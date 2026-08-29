@@ -136,5 +136,30 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
       expect(typeof row.id).toBe('bigint');
       expect(row.id).toBe(created.id);
     });
+
+    it('transferOwnership leaves exactly one owner row for the server', async () => {
+      await prisma.user.createMany({
+        data: [userFixture(USER_ID), userFixture(OTHER_USER_ID)],
+      });
+      await prisma.server.create({ data: serverFixture(SERVER_ID) });
+      await prisma.membership.createMany({
+        data: [
+          { serverId: SERVER_ID, userId: USER_ID, role: 'owner' },
+          { serverId: SERVER_ID, userId: OTHER_USER_ID, role: 'member' },
+        ],
+      });
+
+      await memberships.transferOwnership(SERVER_ID, USER_ID, OTHER_USER_ID);
+
+      // The load-bearing invariant the partial unique index exists for
+      // (data-model.md section 4.3): a direct count, not just the port's own
+      // findByServerAndUser reads, confirms the transaction never leaves the
+      // server with zero or two owners.
+      await expect(
+        prisma.membership.count({
+          where: { serverId: SERVER_ID, role: 'owner' },
+        }),
+      ).resolves.toBe(1);
+    });
   });
 });

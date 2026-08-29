@@ -137,5 +137,33 @@ export function describeMembershipRepositoryContract(
         ).rejects.toBeInstanceOf(NotFoundError);
       });
     });
+
+    describe('transferOwnership', () => {
+      it('flips the old owner to member and the target to owner', async () => {
+        await memberships.create({ ...MEMBER, role: 'owner' });
+        await memberships.create({
+          serverId: SERVER_ID,
+          userId: OTHER_USER_ID,
+          role: 'member',
+        });
+
+        await memberships.transferOwnership(SERVER_ID, USER_ID, OTHER_USER_ID);
+
+        await expect(
+          memberships.findByServerAndUser(SERVER_ID, USER_ID),
+        ).resolves.toMatchObject({ role: 'member' });
+        await expect(
+          memberships.findByServerAndUser(SERVER_ID, OTHER_USER_ID),
+        ).resolves.toMatchObject({ role: 'owner' });
+      });
+
+      it('rejects a target who is not a member of the server', async () => {
+        await memberships.create({ ...MEMBER, role: 'owner' });
+
+        await expect(
+          memberships.transferOwnership(SERVER_ID, USER_ID, OTHER_USER_ID),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
   });
 }
