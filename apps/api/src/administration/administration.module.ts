@@ -6,6 +6,7 @@ import { PrismaMembershipRepository } from './adapters/prisma-membership-reposit
 import { PrismaServerRepository } from './adapters/prisma-server-repository.adapter';
 import { AdministrationController } from './administration.controller';
 import { AdministrationService } from './administration.service';
+import { InviteController } from './invite.controller';
 import { InviteRepository } from './invite-repository.interface';
 import { MembershipRepository } from './membership-repository.interface';
 import { ServerRepository } from './server-repository.interface';
@@ -24,7 +25,7 @@ import { ServerRepository } from './server-repository.interface';
  */
 @Module({
   imports: [AuthModule],
-  controllers: [AdministrationController],
+  controllers: [AdministrationController, InviteController],
   providers: [
     { provide: ServerRepository, useClass: PrismaServerRepository },
     { provide: MembershipRepository, useClass: PrismaMembershipRepository },

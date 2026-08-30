@@ -139,6 +139,48 @@ export class AdministrationController {
     return toInviteResponse(invite);
   }
 
+  /**
+   * Members are refused by the decorator regardless of `memberInviteToggle`.
+   * The toggle governs viewing and sharing only — see
+   * `AdministrationService.revokeInvite`.
+   *
+   * `strict-mutation` rather than a new policy: rate-limiter.md section 4
+   * already names "Invite regenerate, role promotion" as exactly what that
+   * budget is for. The budget being shared across every `strict-mutation`
+   * route is intended — someone hammering regenerate spends the same tokens
+   * they would need for role changes.
+   */
+  @Delete(':serverId/invite')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner', 'moderator')
+  @RateLimit('strict-mutation')
+  @HttpCode(204)
+  async revokeInvite(
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+  ): Promise<void> {
+    await this.administration.revokeInvite(serverId);
+  }
+
+  /**
+   * Same authorization and budget as `revokeInvite`; also un-revokes.
+   *
+   * 200 rather than Nest's POST default of 201: this replaces a code in the
+   * server's one existing invite row, it does not create a resource at a new
+   * URL.
+   */
+  @Post(':serverId/invite/regenerate')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner', 'moderator')
+  @RateLimit('strict-mutation')
+  @HttpCode(200)
+  async regenerateInvite(
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+  ): Promise<InviteResponse> {
+    const invite = await this.administration.regenerateInvite(serverId);
+
+    return toInviteResponse(invite);
+  }
+
   @Patch(':serverId')
   @UseGuards(RequireRoleGuard)
   @RequireRole('owner')

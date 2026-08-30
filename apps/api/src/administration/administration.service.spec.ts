@@ -180,6 +180,160 @@ describe('AdministrationService', () => {
     });
   });
 
+  describe('revokeInvite / regenerateInvite', () => {
+    async function seedServer() {
+      return service.createServer(OWNER_ID, {
+        name: 'General Chat',
+        iconUrl: null,
+      });
+    }
+
+    it('revoking marks the invite dead but keeps the code', async () => {
+      const server = await seedServer();
+      const before = await service.getInvite(server.id, OWNER_ID);
+
+      const revoked = await service.revokeInvite(server.id);
+
+      expect(revoked.revokedAt).toBeInstanceOf(Date);
+      expect(revoked.code).toBe(before.code);
+    });
+
+    it('revoking twice leaves the original timestamp alone', async () => {
+      const server = await seedServer();
+      const first = await service.revokeInvite(server.id);
+
+      const second = await service.revokeInvite(server.id);
+
+      expect(second.revokedAt).toEqual(first.revokedAt);
+    });
+
+    it('regenerating swaps the code and keeps the row', async () => {
+      const server = await seedServer();
+      const before = await service.getInvite(server.id, OWNER_ID);
+
+      const regenerated = await service.regenerateInvite(server.id);
+
+      expect(regenerated.code).not.toBe(before.code);
+      expect(regenerated.id).toBe(before.id);
+    });
+
+    it('regenerating un-revokes -- there is no separate un-revoke', async () => {
+      const server = await seedServer();
+      await service.revokeInvite(server.id);
+
+      const regenerated = await service.regenerateInvite(server.id);
+
+      expect(regenerated.revokedAt).toBeNull();
+    });
+
+    it('rejects a server with no invite row', async () => {
+      // ServerRepository.create seats nobody and mints no invite.
+      const bare = await servers.create({
+        name: 'Bare',
+        iconUrl: null,
+        channelCreationPolicy: 'everyone',
+        memberInviteToggle: true,
+      });
+
+      await expect(service.revokeInvite(bare.id)).rejects.toBeInstanceOf(
+        NotFoundError,
+      );
+      await expect(service.regenerateInvite(bare.id)).rejects.toBeInstanceOf(
+        NotFoundError,
+      );
+    });
+  });
+
+  describe('previewInvite / joinByCode', () => {
+    async function seedServer() {
+      const server = await service.createServer(OWNER_ID, {
+        name: 'Huddle HQ',
+        iconUrl: null,
+      });
+      const invite = await service.getInvite(server.id, OWNER_ID);
+
+      return { server, code: invite.code };
+    }
+
+    it('previews the server a code points at', async () => {
+      const { server, code } = await seedServer();
+
+      await expect(service.previewInvite(code)).resolves.toMatchObject({
+        id: server.id,
+        name: 'Huddle HQ',
+      });
+    });
+
+    it('seats the joiner as a member', async () => {
+      const { server, code } = await seedServer();
+
+      await service.joinByCode(code, OTHER_USER_ID);
+
+      await expect(
+        memberships.findByServerAndUser(server.id, OTHER_USER_ID),
+      ).resolves.toMatchObject({ role: 'member' });
+    });
+
+    it('joining twice leaves exactly one membership and never conflicts', async () => {
+      const { server, code } = await seedServer();
+
+      await service.joinByCode(code, OTHER_USER_ID);
+      // A double-clicked join button is not a failure condition.
+      await expect(
+        service.joinByCode(code, OTHER_USER_ID),
+      ).resolves.toMatchObject({ id: server.id });
+
+      const mine = await memberships.findByUserId(OTHER_USER_ID);
+      expect(mine).toHaveLength(1);
+    });
+
+    it('does not demote an owner who re-uses their own code', async () => {
+      const { server, code } = await seedServer();
+
+      await service.joinByCode(code, OWNER_ID);
+
+      // The idempotent branch must leave the existing role alone, not
+      // overwrite it with 'member' -- that would strip the server's owner.
+      await expect(
+        memberships.findByServerAndUser(server.id, OWNER_ID),
+      ).resolves.toMatchObject({ role: 'owner' });
+    });
+
+    it('rejects a revoked code and an unknown code identically', async () => {
+      const { server, code } = await seedServer();
+      await service.revokeInvite(server.id);
+
+      const revoked = await service
+        .previewInvite(code)
+        .catch((error: NotFoundError) => error);
+      const unknown = await service
+        .previewInvite('ZZZZZZZZZZ')
+        .catch((error: NotFoundError) => error);
+
+      // Same status, same message, no details. A distinguishable response
+      // would make the endpoint an oracle for which codes used to be valid.
+      expect(revoked).toBeInstanceOf(NotFoundError);
+      expect(unknown).toBeInstanceOf(NotFoundError);
+      expect((revoked as NotFoundError).message).toBe(
+        (unknown as NotFoundError).message,
+      );
+      expect((revoked as NotFoundError).details).toBeUndefined();
+      expect((unknown as NotFoundError).details).toBeUndefined();
+    });
+
+    it('refuses to seat anyone through a revoked code', async () => {
+      const { server, code } = await seedServer();
+      await service.revokeInvite(server.id);
+
+      await expect(
+        service.joinByCode(code, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(NotFoundError);
+      await expect(
+        memberships.findByServerAndUser(server.id, OTHER_USER_ID),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('updateServer', () => {
     it('applies a partial update', async () => {
       const server = await service.createServer(OWNER_ID, {

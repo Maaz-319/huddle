@@ -262,6 +262,100 @@ describe('GET /servers/:serverId/invite (e2e)', () => {
     });
   });
 
+  it('lets the owner revoke, and revoking twice is a no-op', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+    const create = await owner.post('/servers').send({ name: 'Invite Test' });
+    const serverId = idOf(create.body);
+
+    const first = await owner.delete(`/servers/${serverId}/invite`);
+    expect(first.status).toBe(204);
+
+    const afterFirst = await prisma.invite.findUniqueOrThrow({
+      where: { serverId: BigInt(serverId) },
+    });
+
+    const second = await owner.delete(`/servers/${serverId}/invite`);
+    expect(second.status).toBe(204);
+
+    const afterSecond = await prisma.invite.findUniqueOrThrow({
+      where: { serverId: BigInt(serverId) },
+    });
+    // Revocation records when the link died, not when it was last asked to.
+    expect(afterSecond.revokedAt).toEqual(afterFirst.revokedAt);
+  });
+
+  it('regenerates in place: new code, same row, revokedAt cleared', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+    const create = await owner.post('/servers').send({ name: 'Invite Test' });
+    const serverId = idOf(create.body);
+    const before = await prisma.invite.findUniqueOrThrow({
+      where: { serverId: BigInt(serverId) },
+    });
+    await owner.delete(`/servers/${serverId}/invite`);
+
+    const response = await owner.post(`/servers/${serverId}/invite/regenerate`);
+
+    expect(response.status).toBe(200);
+    expect(codeOf(response.body)).not.toBe(before.code);
+    expect(response.body).toMatchObject({ revokedAt: null });
+
+    const after = await prisma.invite.findUniqueOrThrow({
+      where: { serverId: BigInt(serverId) },
+    });
+    // Same slot, new code -- and regenerating is how a revoked link comes
+    // back, since there is no separate un-revoke.
+    expect(after.id).toBe(before.id);
+    expect(after.revokedAt).toBeNull();
+  });
+
+  it('lets a moderator revoke and regenerate', async () => {
+    const { serverId, moderator } = await seedServer(true);
+
+    const revoke = await moderator.delete(`/servers/${serverId}/invite`);
+    expect(revoke.status).toBe(204);
+
+    const regenerate = await moderator.post(
+      `/servers/${serverId}/invite/regenerate`,
+    );
+    expect(regenerate.status).toBe(200);
+  });
+
+  it('refuses a member both routes even with memberInviteToggle on', async () => {
+    const { serverId, member } = await seedServer(true);
+
+    // The one place the two invite permissions could plausibly be conflated.
+    // PRD section 5 is explicit: revoke/regenerate is Owner and Moderator
+    // only. A member who can read the code can never destroy it.
+    const read = await member.get(`/servers/${serverId}/invite`);
+    expect(read.status).toBe(200);
+
+    const revoke = await member.delete(`/servers/${serverId}/invite`);
+    expect(revoke.status).toBe(403);
+
+    const regenerate = await member.post(
+      `/servers/${serverId}/invite/regenerate`,
+    );
+    expect(regenerate.status).toBe(403);
+  });
+
+  it('spends the strict-mutation budget, returning 429 with Retry-After', async () => {
+    const owner = await loggedInAgent(app, OWNER);
+    const create = await owner.post('/servers').send({ name: 'Invite Test' });
+    const serverId = idOf(create.body);
+
+    // POST /servers already spent one token, so the budget of 3 leaves two
+    // regenerates before the third is refused.
+    await owner.post(`/servers/${serverId}/invite/regenerate`);
+    await owner.post(`/servers/${serverId}/invite/regenerate`);
+    const throttled = await owner.post(
+      `/servers/${serverId}/invite/regenerate`,
+    );
+
+    expect(throttled.status).toBe(429);
+    expect(throttled.body).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+    expect(Number(throttled.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+  });
+
   it('rejects an unauthenticated read with 401', async () => {
     const response = await request(app.getHttpServer()).get(
       '/servers/999000000000000001/invite',
