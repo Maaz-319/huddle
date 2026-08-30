@@ -18,6 +18,7 @@ import { ParseSnowflakePipe } from '../common/parse-snowflake.pipe';
 import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import { CreateServerDto } from './create-server.dto';
+import type { Invite } from './invite-repository.interface';
 import type { Membership } from './membership-repository.interface';
 import type { Server } from './server-repository.interface';
 import { TransferOwnershipDto } from './transfer-ownership.dto';
@@ -60,6 +61,24 @@ function toMembershipResponse(membership: Membership): MembershipResponse {
   };
 }
 
+/** The shape every invite route returns. `id` is deliberately absent: a client
+ * addresses an invite by its server or its code, never by its row id, and the
+ * id would only be one more identifier to leak. */
+interface InviteResponse {
+  code: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+function toInviteResponse(invite: Invite): InviteResponse {
+  return {
+    code: invite.code,
+    revokedAt:
+      invite.revokedAt === null ? null : invite.revokedAt.toISOString(),
+    createdAt: invite.createdAt.toISOString(),
+  };
+}
+
 @Controller('servers')
 @UseGuards(SessionAuthGuard)
 export class AdministrationController {
@@ -96,6 +115,28 @@ export class AdministrationController {
     const server = await this.administration.getServer(serverId, user.id);
 
     return toServerResponse(server);
+  }
+
+  /**
+   * All three roles are listed rather than the decorator being omitted, and
+   * that is not redundant: `RequireRoleGuard` is what produces 403 for a
+   * non-member and 404 for a server that does not exist, disambiguating the
+   * two with a `ServerRepository.findById` lookup on a null membership.
+   * Naming every role here buys that behaviour for this route instead of
+   * re-deriving it. The `memberInviteToggle` check the Member case also needs
+   * is service logic — see `AdministrationService.getInvite`.
+   */
+  @Get(':serverId/invite')
+  @UseGuards(RequireRoleGuard)
+  @RequireRole('owner', 'moderator', 'member')
+  @RateLimit('read')
+  async getInvite(
+    @CurrentUser() user: User,
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+  ): Promise<InviteResponse> {
+    const invite = await this.administration.getInvite(serverId, user.id);
+
+    return toInviteResponse(invite);
   }
 
   @Patch(':serverId')
