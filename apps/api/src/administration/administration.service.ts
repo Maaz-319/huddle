@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { NotFoundError, ValidationError } from '../common/errors';
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../common/errors';
+import { Invite, InviteRepository } from './invite-repository.interface';
 import {
   Membership,
   MembershipRepository,
@@ -17,7 +22,7 @@ export interface CreateServerRequest {
 }
 
 /**
- * Server/membership orchestration, depending only on the two ports
+ * Server/membership/invite orchestration, depending only on the three ports
  * (AGENTS.md section 2) — no Prisma types belong in this file.
  */
 @Injectable()
@@ -25,6 +30,7 @@ export class AdministrationService {
   constructor(
     private readonly servers: ServerRepository,
     private readonly memberships: MembershipRepository,
+    private readonly invites: InviteRepository,
   ) {}
 
   /**
@@ -102,6 +108,72 @@ export class AdministrationService {
     }
 
     return server;
+  }
+
+  /**
+   * The server's invite, for a caller who is already inside the server.
+   *
+   * The role check is split across two layers on purpose. `RequireRoleGuard`
+   * has already answered "are you in this server at all", including the
+   * 403-vs-404 disambiguation a non-member and a nonexistent server need. What
+   * it cannot answer is this: `@RequireRole` compares against a static list,
+   * and whether an ordinary Member may see the link depends on a per-server
+   * setting the decorator has no way to read. So the guard answers "are you in
+   * this server", and this method answers "does this server let your role see
+   * the link".
+   *
+   * Owners and Moderators ignore `memberInviteToggle` entirely — PRD section 5
+   * gives them the capability unconditionally, and it is only the Member row
+   * that reads "Configurable".
+   *
+   * A revoked invite is returned, with `revokedAt` populated, rather than
+   * hidden behind a 404: the client has to be told the link is dead in order
+   * to say so, and a 404 would make a revoked server look like a missing one.
+   * This is deliberately the opposite of the join path, where a revoked code
+   * 404s — that route serves people outside the server, this one people
+   * already inside it.
+   */
+  async getInvite(serverId: bigint, callerId: bigint): Promise<Invite> {
+    const membership = await this.memberships.findByServerAndUser(
+      serverId,
+      callerId,
+    );
+
+    // The guard has already rejected a non-member, so a null here would mean
+    // this method was reached without it -- a wiring bug, not a 403 case.
+    if (membership === null) {
+      throw new ForbiddenError('Not a member of this server', {
+        serverId: serverId.toString(),
+      });
+    }
+
+    if (membership.role === 'member') {
+      const server = await this.servers.findById(serverId);
+
+      // Same invariant as getServer: a membership always names a real server.
+      if (server === null) {
+        throw new Error(
+          `Membership names server ${serverId.toString()}, which does not exist`,
+        );
+      }
+
+      if (!server.memberInviteToggle) {
+        throw new ForbiddenError(
+          'This server does not let members share the invite link',
+          { serverId: serverId.toString() },
+        );
+      }
+    }
+
+    const invite = await this.invites.findByServerId(serverId);
+
+    if (invite === null) {
+      throw new NotFoundError('Invite not found', {
+        serverId: serverId.toString(),
+      });
+    }
+
+    return invite;
   }
 
   /**

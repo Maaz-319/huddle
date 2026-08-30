@@ -1,8 +1,10 @@
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
+import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
-import { NotFoundError } from '../common/errors';
+import { ForbiddenError, NotFoundError } from '../common/errors';
 import { AdministrationService } from './administration.service';
+import { Role } from './membership-repository.interface';
 
 const OWNER_ID = 300000000000000001n;
 const OTHER_USER_ID = 300000000000000002n;
@@ -10,13 +12,15 @@ const OTHER_USER_ID = 300000000000000002n;
 describe('AdministrationService', () => {
   let servers: FakeServerRepository;
   let memberships: FakeMembershipRepository;
+  let invites: FakeInviteRepository;
   let service: AdministrationService;
 
   beforeEach(() => {
     const store = new FakeAdministrationStore();
     servers = new FakeServerRepository(store);
     memberships = new FakeMembershipRepository(store);
-    service = new AdministrationService(servers, memberships);
+    invites = new FakeInviteRepository(store);
+    service = new AdministrationService(servers, memberships, invites);
   });
 
   describe('createServer', () => {
@@ -82,6 +86,97 @@ describe('AdministrationService', () => {
       await expect(
         service.getServer(999000000000000001n, OWNER_ID),
       ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('getInvite', () => {
+    /**
+     * A server owned by OWNER_ID with the toggle in a given state, plus
+     * OTHER_USER_ID seated in `role`. Both halves of the matrix need this, so
+     * the toggle and the role are the only things a case varies.
+     */
+    async function seed(role: Role, memberInviteToggle: boolean) {
+      const server = await service.createServer(OWNER_ID, {
+        name: 'General Chat',
+        iconUrl: null,
+      });
+      await service.updateServer(server.id, { memberInviteToggle });
+
+      if (role !== 'owner') {
+        await memberships.create({
+          serverId: server.id,
+          userId: OTHER_USER_ID,
+          role,
+        });
+      }
+
+      return server;
+    }
+
+    it.each([
+      ['an owner', 'owner' as const, true],
+      ['an owner', 'owner' as const, false],
+      ['a moderator', 'moderator' as const, true],
+      ['a moderator', 'moderator' as const, false],
+      ['a member', 'member' as const, true],
+    ])(
+      'returns the code for %s with memberInviteToggle %s',
+      async (_label, role, toggle) => {
+        const server = await seed(role, toggle);
+        const callerId = role === 'owner' ? OWNER_ID : OTHER_USER_ID;
+
+        const invite = await service.getInvite(server.id, callerId);
+
+        expect(invite.serverId).toBe(server.id);
+        expect(invite.code).toHaveLength(10);
+      },
+    );
+
+    it('rejects a member when memberInviteToggle is off', async () => {
+      const server = await seed('member', false);
+
+      await expect(
+        service.getInvite(server.id, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it('still serves the owner and moderator on that same server', async () => {
+      // The toggle is asserted in both directions rather than only as a
+      // rejection: an implementation that gated everyone would pass the case
+      // above and fail here.
+      const server = await seed('member', false);
+      const moderatorId = 300000000000000003n;
+      await memberships.create({
+        serverId: server.id,
+        userId: moderatorId,
+        role: 'moderator',
+      });
+
+      await expect(
+        service.getInvite(server.id, OWNER_ID),
+      ).resolves.toMatchObject({ serverId: server.id });
+      await expect(
+        service.getInvite(server.id, moderatorId),
+      ).resolves.toMatchObject({ serverId: server.id });
+    });
+
+    it('returns a revoked invite rather than hiding it', async () => {
+      const server = await seed('owner', true);
+      await invites.revoke(server.id);
+
+      const invite = await service.getInvite(server.id, OWNER_ID);
+
+      // The client has to be told the link is dead in order to say so.
+      expect(invite.revokedAt).toBeInstanceOf(Date);
+      expect(invite.code).toHaveLength(10);
+    });
+
+    it('rejects a caller who is not a member', async () => {
+      const server = await seed('owner', true);
+
+      await expect(
+        service.getInvite(server.id, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenError);
     });
   });
 
