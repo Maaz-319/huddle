@@ -1,16 +1,19 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { RequireRoleGuard } from '../auth/require-role.guard';
+import { PrismaInviteRepository } from './adapters/prisma-invite-repository.adapter';
 import { PrismaMembershipRepository } from './adapters/prisma-membership-repository.adapter';
 import { PrismaServerRepository } from './adapters/prisma-server-repository.adapter';
 import { AdministrationController } from './administration.controller';
 import { AdministrationService } from './administration.service';
+import { InviteRepository } from './invite-repository.interface';
 import { MembershipRepository } from './membership-repository.interface';
 import { ServerRepository } from './server-repository.interface';
 
 /**
- * Servers and membership. `ServerRepository`/`MembershipRepository` are the
- * ports #36–#37 build the rest of server-level authority on top of.
+ * Servers, membership, and invites. `ServerRepository`/`MembershipRepository`
+ * are the ports #36–#37 build server-level authority on top of;
+ * `InviteRepository` is what #46–#48 build joining on top of.
  *
  * `RequireRoleGuard` lives in `src/auth/` (docs/architecture/auth-service.md
  * section 7 names it as the Auth Service's enforcement mechanism), but is
@@ -25,9 +28,15 @@ import { ServerRepository } from './server-repository.interface';
   providers: [
     { provide: ServerRepository, useClass: PrismaServerRepository },
     { provide: MembershipRepository, useClass: PrismaMembershipRepository },
+    { provide: InviteRepository, useClass: PrismaInviteRepository },
     AdministrationService,
     RequireRoleGuard,
   ],
-  exports: [ServerRepository, MembershipRepository, RequireRoleGuard],
+  exports: [
+    ServerRepository,
+    MembershipRepository,
+    InviteRepository,
+    RequireRoleGuard,
+  ],
 })
 export class AdministrationModule {}
