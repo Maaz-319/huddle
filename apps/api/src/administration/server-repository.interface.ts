@@ -1,3 +1,5 @@
+import { Invite } from './invite-repository.interface';
+
 /**
  * A Huddle server, as the rest of the application sees one.
  *
@@ -50,16 +52,21 @@ export abstract class ServerRepository {
   abstract create(input: CreateServerInput): Promise<Server>;
 
   /**
-   * Provisions a server and seats `ownerId` as its owner `Membership`, in one
-   * transaction. Two sequential writes could leave a server with no owner if
-   * the process died between them; this is the method that guarantees that
-   * never happens, the same way the database's own partial unique index
-   * guarantees a server never ends up with two.
+   * Provisions a server, seats `ownerId` as its owner `Membership`, and mints
+   * the server's `Invite`, in one transaction. Two sequential writes could
+   * leave a server with no owner — or with no shareable code — if the process
+   * died between them; this is the method that guarantees neither happens, the
+   * same way the database's own partial unique index guarantees a server never
+   * ends up with two owners.
+   *
+   * This is the only place an invite is born. `create` above deliberately does
+   * not mint one: it seats nobody, so it models a server that does not yet
+   * exist as far as any user-facing flow is concerned.
    */
   abstract createWithOwner(
     input: CreateServerInput,
     ownerId: bigint,
-  ): Promise<{ server: Server; membership: OwnerMembership }>;
+  ): Promise<{ server: Server; membership: OwnerMembership; invite: Invite }>;
 
   /** The server with this id, or `null`. */
   abstract findById(id: bigint): Promise<Server | null>;
