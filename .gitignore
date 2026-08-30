@@ -13,3 +13,6 @@ coverage/
 
 # Prisma 7 generates its client into the project folder, not node_modules.
 apps/api/src/generated/
+
+# graphify's generated knowledge graph, rebuilt from the repo on demand.
+graphify-out/
