@@ -129,7 +129,26 @@ Single active invite per server — one row per server, updated in place on rege
 | `serverId` | Snowflake (FK → Server), unique | One invite row per server |
 | `code` | string, unique | Overwritten on regenerate ("same slot, new code") |
 | `revokedAt` | timestamp, nullable | Set when explicitly revoked without regenerating |
-| `createdAt` | timestamp | |
+| `createdAt` | timestamp | Refreshed on regenerate, since the row outlives any one code |
+
+**Code format.** 10 characters drawn from the 31-character alphabet
+`ABCDEFGHJKMNPQRSTUVWXYZ23456789` — uppercase letters and digits with `0`, `O`, `1`, `I` and
+`L` removed, so a code can be read aloud or copied off a screen without ambiguity. That is
+~49 bits of entropy: far too sparse to enumerate, which is what a permanent link needs given
+it has no expiry or use limit to fall back on.
+
+Codes are drawn from `crypto.randomBytes` with **rejection sampling**, never `byte % 31`: 256
+is not a multiple of 31, so the modulo would over-pick the first 8 characters of the alphabet
+by ~12%. Bytes at or above `256 - (256 % 31)` are discarded and redrawn instead.
+
+Because `code` is unique, a write that mints one retries with a fresh code on a collision,
+**bounded to 5 attempts**. The bound is deliberate: at 49 bits a second collision means the
+generator is broken, and an unbounded loop would spin silently rather than surface that. The
+retry wraps the whole transaction rather than the insert alone — a unique violation aborts the
+Postgres transaction it occurred in, so the retry has to begin a new one.
+
+The invite is minted inside `ServerRepository.createWithOwner`'s transaction, alongside the
+server and its owner `Membership`, so a server can never exist without a shareable code.
 
 ### 4.8 Message
 

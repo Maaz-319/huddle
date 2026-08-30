@@ -1,11 +1,18 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaInviteRepository } from '../src/administration/adapters/prisma-invite-repository.adapter';
 import { PrismaMembershipRepository } from '../src/administration/adapters/prisma-membership-repository.adapter';
 import { PrismaServerRepository } from '../src/administration/adapters/prisma-server-repository.adapter';
+import * as inviteCode from '../src/administration/invite-code';
+import { InviteRepository } from '../src/administration/invite-repository.interface';
 import { MembershipRepository } from '../src/administration/membership-repository.interface';
 import { ServerRepository } from '../src/administration/server-repository.interface';
 import { PrismaService } from '../src/common/prisma.service';
 import { SnowflakeService } from '../src/common/snowflake.service';
+import {
+  describeInviteRepositoryContract,
+  INVITE_OWNER_ID,
+} from './fakes/invite-repository.contract';
 import {
   describeMembershipRepositoryContract,
   OTHER_SERVER_ID,
@@ -52,11 +59,12 @@ const GENERAL = {
  * are the same ones the fakes are held to; the cases below are the ones a
  * `Map` cannot express — real foreign keys, real transaction rollback.
  */
-describe('PrismaServerRepository / PrismaMembershipRepository', () => {
+describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepository', () => {
   let module: TestingModule;
   let prisma: PrismaService;
   let servers: ServerRepository;
   let memberships: MembershipRepository;
+  let invites: InviteRepository;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -68,6 +76,7 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
         { provide: ConfigService, useValue: { get: () => TEST_DATABASE_URL } },
         { provide: ServerRepository, useClass: PrismaServerRepository },
         { provide: MembershipRepository, useClass: PrismaMembershipRepository },
+        { provide: InviteRepository, useClass: PrismaInviteRepository },
       ],
     }).compile();
 
@@ -75,6 +84,7 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
     prisma = module.get(PrismaService);
     servers = module.get(ServerRepository);
     memberships = module.get(MembershipRepository);
+    invites = module.get(InviteRepository);
   });
 
   afterAll(async () => {
@@ -84,6 +94,7 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
   it('resolves the port tokens to the Prisma adapters', () => {
     expect(servers).toBeInstanceOf(PrismaServerRepository);
     expect(memberships).toBeInstanceOf(PrismaMembershipRepository);
+    expect(invites).toBeInstanceOf(PrismaInviteRepository);
   });
 
   describeServerRepositoryContract('PrismaServerRepository', async () => {
@@ -110,6 +121,14 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
     },
   );
 
+  describeInviteRepositoryContract('PrismaInviteRepository', async () => {
+    await truncateAll(prisma);
+    // createWithOwner seats INVITE_OWNER_ID as owner -- a real foreign key,
+    // unlike the fake, so the row has to actually exist first.
+    await prisma.user.create({ data: userFixture(INVITE_OWNER_ID) });
+    return { invites, servers };
+  });
+
   describe('behaviour that needs a real database', () => {
     beforeEach(async () => {
       await truncateAll(prisma);
@@ -124,6 +143,91 @@ describe('PrismaServerRepository / PrismaMembershipRepository', () => {
 
       await expect(prisma.server.findMany()).resolves.toEqual([]);
       await expect(prisma.membership.findMany()).resolves.toEqual([]);
+      await expect(prisma.invite.findMany()).resolves.toEqual([]);
+    });
+
+    it('create mints no invite -- only createWithOwner does', async () => {
+      // The ownerless variant seats nobody, so it deliberately does not mint a
+      // code. Asserted rather than left implicit: the invite routes 404 for
+      // such a server, and that has to be a decision, not an accident.
+      const created = await servers.create(GENERAL);
+
+      await expect(
+        prisma.invite.findUnique({ where: { serverId: created.id } }),
+      ).resolves.toBeNull();
+    });
+
+    it('deleting a server cascades its invite away', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const { server, invite } = await servers.createWithOwner(
+        GENERAL,
+        OWNER_ID,
+      );
+
+      await servers.delete(server.id);
+
+      // Invite cascades off Server at the schema level (data-model.md section
+      // 7); without it the code would outlive the server it admits people to.
+      await expect(invites.findByCode(invite.code)).resolves.toBeNull();
+    });
+
+    it('createWithOwner retries past a colliding code and still commits', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const taken = await servers.createWithOwner(GENERAL, OWNER_ID);
+
+      // Force the collision the retry exists for: the first draw hands back a
+      // code the unique index already holds, so the write must abort its
+      // transaction, draw again, and commit on the second attempt.
+      const spy = jest
+        .spyOn(inviteCode, 'generateInviteCode')
+        .mockReturnValueOnce(taken.invite.code);
+
+      const retried = await servers.createWithOwner(GENERAL, OWNER_ID);
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(retried.invite.code).not.toBe(taken.invite.code);
+      // The aborted first attempt must leave nothing behind: two servers
+      // exist, not three.
+      await expect(prisma.server.count()).resolves.toBe(2);
+      await expect(prisma.invite.count()).resolves.toBe(2);
+
+      spy.mockRestore();
+    });
+
+    it('regenerate retries past a colliding code', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const other = await servers.createWithOwner(GENERAL, OWNER_ID);
+      const target = await servers.createWithOwner(GENERAL, OWNER_ID);
+
+      const spy = jest
+        .spyOn(inviteCode, 'generateInviteCode')
+        .mockReturnValueOnce(other.invite.code);
+
+      const regenerated = await invites.regenerate(target.server.id);
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(regenerated.code).not.toBe(other.invite.code);
+      expect(regenerated.code).not.toBe(target.invite.code);
+
+      spy.mockRestore();
+    });
+
+    it('gives up after five colliding draws rather than looping forever', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const taken = await servers.createWithOwner(GENERAL, OWNER_ID);
+
+      const spy = jest
+        .spyOn(inviteCode, 'generateInviteCode')
+        .mockReturnValue(taken.invite.code);
+
+      // A generator stuck on one code is a broken generator. The bound is what
+      // surfaces that as a failed request instead of a hung one.
+      await expect(
+        servers.createWithOwner(GENERAL, OWNER_ID),
+      ).rejects.toThrow();
+      expect(spy).toHaveBeenCalledTimes(5);
+
+      spy.mockRestore();
     });
 
     it('mints server ids as bigint, never as a number', async () => {

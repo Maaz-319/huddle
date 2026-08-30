@@ -1,3 +1,4 @@
+import { isInviteCode } from '../../src/administration/invite-code';
 import {
   CreateServerInput,
   ServerRepository,
@@ -78,6 +79,25 @@ export function describeServerRepositoryContract(
           userId: OWNER_ID,
           role: 'owner',
         });
+      });
+
+      it('mints the server an invite in the same call', async () => {
+        const { server, invite } = await servers.createWithOwner(
+          GENERAL,
+          OWNER_ID,
+        );
+
+        // A server can never exist without a shareable code -- the invite is
+        // born inside this transaction, not by a later second write.
+        expect(invite).toMatchObject({ serverId: server.id, revokedAt: null });
+        expect(isInviteCode(invite.code)).toBe(true);
+      });
+
+      it('gives two servers different invite codes', async () => {
+        const first = await servers.createWithOwner(GENERAL, OWNER_ID);
+        const second = await servers.createWithOwner(STUDY_GROUP, OWNER_ID);
+
+        expect(first.invite.code).not.toBe(second.invite.code);
       });
 
       it('the created server is then findable', async () => {

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
 import { SnowflakeService } from '../../common/snowflake.service';
-import { Prisma, Server as ServerRow } from '../../generated/prisma/client';
+import { Server as ServerRow } from '../../generated/prisma/client';
+import { Invite } from '../invite-repository.interface';
 import {
   CreateServerInput,
   OwnerMembership,
@@ -10,19 +11,19 @@ import {
   ServerRepository,
   UpdateServerInput,
 } from '../server-repository.interface';
-
-/** Prisma's code for "the record to update/delete was not found". */
-const RECORD_NOT_FOUND = 'P2025';
+import { hasPrismaCode, RECORD_NOT_FOUND, withCodeRetry } from './prisma-codes';
+import { toInvite } from './prisma-invite-repository.adapter';
 
 /**
  * Postgres-backed `ServerRepository`, via Prisma.
  *
- * `createWithOwner` is the first `$transaction` in the codebase: it writes
- * both the `Server` and its owner `Membership` row, so a crash between the
- * two never leaves a server ownerless. This lives here rather than being
- * sequenced from `AdministrationService` because only an adapter may touch
- * `PrismaService` (AGENTS.md section 2) — a service coordinating two ports
- * with two separate calls could not make the pair atomic.
+ * `createWithOwner` is the first `$transaction` in the codebase: it writes the
+ * `Server`, its owner `Membership`, and its `Invite` together, so a crash
+ * partway never leaves a server ownerless or without a shareable code. This
+ * lives here rather than being sequenced from `AdministrationService` because
+ * only an adapter may touch `PrismaService` (AGENTS.md section 2) — a service
+ * coordinating three ports with three separate calls could not make them
+ * atomic.
  */
 @Injectable()
 export class PrismaServerRepository extends ServerRepository {
@@ -44,9 +45,12 @@ export class PrismaServerRepository extends ServerRepository {
   async createWithOwner(
     input: CreateServerInput,
     ownerId: bigint,
-  ): Promise<{ server: Server; membership: OwnerMembership }> {
-    const [serverRow, membershipRow] = await this.prisma.$transaction(
-      async (tx) => {
+  ): Promise<{ server: Server; membership: OwnerMembership; invite: Invite }> {
+    // The retry wraps the whole transaction, not just the invite insert: a
+    // unique-code collision aborts the transaction it happened in, so the
+    // retry has to start a new one. See `withCodeRetry`'s own doc.
+    const [serverRow, membershipRow, inviteRow] = await withCodeRetry((code) =>
+      this.prisma.$transaction(async (tx) => {
         const server = await tx.server.create({
           data: { id: this.snowflakes.generate(), ...input },
         });
@@ -55,8 +59,12 @@ export class PrismaServerRepository extends ServerRepository {
           data: { serverId: server.id, userId: ownerId, role: 'owner' },
         });
 
-        return [server, membership] as const;
-      },
+        const invite = await tx.invite.create({
+          data: { id: this.snowflakes.generate(), serverId: server.id, code },
+        });
+
+        return [server, membership, invite] as const;
+      }),
     );
 
     return {
@@ -67,6 +75,7 @@ export class PrismaServerRepository extends ServerRepository {
         role: 'owner',
         joinedAt: membershipRow.joinedAt,
       },
+      invite: toInvite(inviteRow),
     };
   }
 
@@ -104,13 +113,6 @@ export class PrismaServerRepository extends ServerRepository {
       throw error;
     }
   }
-}
-
-/** Narrows a caught value to a Prisma error carrying a specific code. */
-function hasPrismaCode(error: unknown, code: string): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === code
-  );
 }
 
 /**

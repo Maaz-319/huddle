@@ -1,3 +1,5 @@
+import { generateInviteCode } from '../../src/administration/invite-code';
+import { Invite } from '../../src/administration/invite-repository.interface';
 import {
   CreateServerInput,
   OwnerMembership,
@@ -43,7 +45,7 @@ export class FakeServerRepository extends ServerRepository {
   createWithOwner(
     input: CreateServerInput,
     ownerId: bigint,
-  ): Promise<{ server: Server; membership: OwnerMembership }> {
+  ): Promise<{ server: Server; membership: OwnerMembership; invite: Invite }> {
     const server: Server = {
       id: this.nextId++,
       createdAt: new Date(),
@@ -59,9 +61,19 @@ export class FakeServerRepository extends ServerRepository {
     };
     this.store.memberships.set(membershipKey(server.id, ownerId), membership);
 
+    const invite: Invite = {
+      id: this.nextId++,
+      serverId: server.id,
+      code: generateInviteCode(),
+      revokedAt: null,
+      createdAt: new Date(),
+    };
+    this.store.invites.set(server.id, invite);
+
     return Promise.resolve({
       server: { ...server },
       membership: { ...membership },
+      invite: { ...invite },
     });
   }
 
@@ -87,6 +99,11 @@ export class FakeServerRepository extends ServerRepository {
   }
 
   delete(id: bigint): Promise<void> {
+    // Invite cascades off Server at the schema level (data-model.md section
+    // 7), so the fake drops it here too -- otherwise a deleted server's code
+    // would still resolve through findByCode.
+    this.store.invites.delete(id);
+
     if (!this.store.servers.delete(id)) {
       return Promise.reject(
         new NotFoundError('Server not found', { id: id.toString() }),
