@@ -177,6 +177,32 @@ export class AdministrationService {
   }
 
   /**
+   * Kills the server's current invite link. Authorization (owner or moderator)
+   * already happened in `RequireRoleGuard`.
+   *
+   * `memberInviteToggle` is deliberately *not* consulted here. The toggle
+   * governs viewing and sharing only — PRD section 5 is explicit that revoke
+   * and regenerate are Owner and Moderator alone, so a Member with the toggle
+   * on can read the code and can still never destroy it.
+   */
+  async revokeInvite(serverId: bigint): Promise<Invite> {
+    return this.invites.revoke(serverId);
+  }
+
+  /**
+   * Replaces the server's invite code in place. Same authorization note as
+   * `revokeInvite`, including the toggle not applying.
+   *
+   * This is also how a revoked invite comes back to life: `regenerate` clears
+   * `revokedAt`, and there is deliberately no separate un-revoke operation —
+   * a server has exactly one slot, either live or dead
+   * (administration-service.md section 5).
+   */
+  async regenerateInvite(serverId: bigint): Promise<Invite> {
+    return this.invites.regenerate(serverId);
+  }
+
+  /**
    * Applies a partial update. Authorization (owner-only) already happened in
    * `RequireRoleGuard` — this method does not re-check the caller's role.
    */
@@ -190,6 +216,76 @@ export class AdministrationService {
   /** Hard-deletes the server. Same authorization note as `updateServer`. */
   async deleteServer(serverId: bigint): Promise<void> {
     await this.servers.delete(serverId);
+  }
+
+  /**
+   * The server an invite code points at, for someone not yet inside it.
+   *
+   * Only enough to answer "join this?" — the caller is not a member, so they
+   * learn nothing about member counts, channels, or who owns it.
+   */
+  async previewInvite(code: string): Promise<Server> {
+    const invite = await this.requireLiveInvite(code);
+    const server = await this.servers.findById(invite.serverId);
+
+    // Invite cascades off Server, so a live invite always names a real one.
+    if (server === null) {
+      throw new Error(
+        `Invite names server ${invite.serverId.toString()}, which does not exist`,
+      );
+    }
+
+    return server;
+  }
+
+  /**
+   * Seats the caller in the server the code points at, as a `member`.
+   *
+   * Idempotent: a double-clicked join button is not a failure condition, so a
+   * caller who is already a member gets the same 200 and the same body, and
+   * exactly one `Membership` row exists either way. The route must never
+   * surface a 409.
+   */
+  async joinByCode(code: string, userId: bigint): Promise<Server> {
+    const server = await this.previewInvite(code);
+
+    const existing = await this.memberships.findByServerAndUser(
+      server.id,
+      userId,
+    );
+
+    if (existing === null) {
+      await this.memberships.create({
+        serverId: server.id,
+        userId,
+        role: 'member',
+      });
+    }
+
+    return server;
+  }
+
+  /**
+   * The live invite for a code, or the one 404 both invite-code routes give.
+   *
+   * An unknown code and a revoked code fail identically, through this single
+   * path, and the error carries no `details`. If a revoked code produced a
+   * distinguishable response the endpoint would be an oracle for which codes
+   * used to be valid, and putting the code into `details` would make two
+   * different unknown codes distinguishable from each other.
+   *
+   * This is the opposite of `getInvite`, which returns a revoked invite
+   * rather than hiding it — that route serves people already inside the
+   * server, and this one serves people outside it.
+   */
+  private async requireLiveInvite(code: string): Promise<Invite> {
+    const invite = await this.invites.findByCode(code);
+
+    if (invite === null || invite.revokedAt !== null) {
+      throw new NotFoundError('Invite not found');
+    }
+
+    return invite;
   }
 
   /**
