@@ -9,6 +9,7 @@ import {
   Channel,
   ChannelRepository,
   CreateChannelInput,
+  UpdateChannelInput,
 } from './channel-repository.interface';
 import { Invite, InviteRepository } from './invite-repository.interface';
 import {
@@ -449,6 +450,44 @@ export class AdministrationService {
     return channels.filter(
       (channel) => !channel.isPrivate || visible.has(channel.id),
     );
+  }
+
+  /**
+   * Applies a partial update to a channel. Authorization —
+   * `manage_settings` on this channel — already happened in
+   * `RequireCapabilityGuard`, so this method does not re-check it.
+   *
+   * Throws `ConflictError` if the server already holds another channel of
+   * that name, and `NotFoundError` if the id does not exist. Both come
+   * straight from the adapter.
+   *
+   * **Flipping a channel from private to public leaves its `ChannelMember`
+   * rows in place.** They go inert while it is public — nothing reads them,
+   * because `resolveCapability` only consults channel membership when the
+   * channel is private — and mean exactly what they used to if it is flipped
+   * back. Deleting them on the flip would destroy the member list on a
+   * misclick, with nothing to rebuild it from, so this is the safe direction
+   * to be wrong in.
+   */
+  async updateChannel(
+    channelId: bigint,
+    patch: UpdateChannelInput,
+  ): Promise<Channel> {
+    return this.channels.update(channelId, patch);
+  }
+
+  /**
+   * Hard-deletes a channel. Same authorization note as `updateChannel`.
+   *
+   * `Message`, `ChannelMember` and `ChannelOverride` rows go with it through
+   * the schema's cascade (data-model.md section 7), and there is deliberately
+   * no application-level cleanup here: duplicating the cascade in code means
+   * two places that have to be kept in step, and the one in the schema is the
+   * one that actually runs. The cascade is asserted directly in
+   * `administration-repositories.integration-spec.ts`.
+   */
+  async deleteChannel(channelId: bigint): Promise<void> {
+    await this.channels.delete(channelId);
   }
 
   /**

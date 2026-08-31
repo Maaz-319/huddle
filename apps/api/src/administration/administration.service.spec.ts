@@ -4,7 +4,7 @@ import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository'
 import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
-import { ForbiddenError, NotFoundError } from '../common/errors';
+import { ConflictError, ForbiddenError, NotFoundError } from '../common/errors';
 import { AdministrationService } from './administration.service';
 import { Role } from './membership-repository.interface';
 
@@ -584,6 +584,100 @@ describe('AdministrationService', () => {
       // The extra read is the price of the privacy rule, so it is only paid
       // when the request actually asks for privacy.
       expect(read).not.toHaveBeenCalled();
+    });
+  });
+  describe('updateChannel', () => {
+    it('renames a channel', async () => {
+      const serverId = await seedServer('owner');
+      const channel = await channels.create({
+        serverId,
+        name: 'genral',
+        isPrivate: false,
+      });
+
+      const renamed = await service.updateChannel(channel.id, {
+        name: 'general',
+      });
+
+      expect(renamed.name).toBe('general');
+      await expect(channels.findById(channel.id)).resolves.toMatchObject({
+        name: 'general',
+      });
+    });
+
+    it('refuses a rename onto a name the server already uses', async () => {
+      const serverId = await seedServer('owner');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const other = await channels.create({
+        serverId,
+        name: 'random',
+        isPrivate: false,
+      });
+
+      await expect(
+        service.updateChannel(other.id, { name: 'general' }),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it('keeps the member list when a private channel is made public', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(channel.id, OTHER_USER_ID);
+
+      await service.updateChannel(channel.id, { isPrivate: false });
+
+      // Inert while public, and meaningful again on the way back -- deleting
+      // them here would destroy the list on a misclick.
+      await expect(
+        channelMembers.isMember(channel.id, OTHER_USER_ID),
+      ).resolves.toBe(true);
+    });
+
+    it('restores the same member list when it is made private again', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(channel.id, OTHER_USER_ID);
+
+      await service.updateChannel(channel.id, { isPrivate: false });
+      await service.updateChannel(channel.id, { isPrivate: true });
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+      expect(listed.map((c) => c.name)).toEqual(['mods']);
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.updateChannel(999000000000000001n, { name: 'general' }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('deleteChannel', () => {
+    it('removes the channel', async () => {
+      const serverId = await seedServer('owner');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await service.deleteChannel(channel.id);
+
+      await expect(channels.findById(channel.id)).resolves.toBeNull();
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.deleteChannel(999000000000000001n),
+      ).rejects.toBeInstanceOf(NotFoundError);
     });
   });
 });
