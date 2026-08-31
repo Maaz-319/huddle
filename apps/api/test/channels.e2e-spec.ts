@@ -286,6 +286,40 @@ describe('POST/GET /servers/:serverId/channels (e2e)', () => {
       expect(response.status).toBe(403);
     });
 
+    it('refuses a member making it private, though the policy lets them create', async () => {
+      const { serverId, member } = await seedServer();
+
+      const response = await member
+        .post(`/servers/${serverId}/channels`)
+        .send({ name: 'secret', isPrivate: true });
+
+      // The default policy is `everyone`, so the creation guard says yes.
+      // PRD section 5's "make a channel private" is the separate question,
+      // and the answer is Owner and Moderator only.
+      expect(response.status).toBe(403);
+      expect(errorCodeOf(response.body)).toBe('FORBIDDEN');
+    });
+
+    it('lets that same member create a public channel', async () => {
+      const { serverId, member } = await seedServer();
+
+      const response = await member
+        .post(`/servers/${serverId}/channels`)
+        .send({ name: 'general', isPrivate: false });
+
+      expect(response.status).toBe(201);
+    });
+
+    it('lets a moderator create a private channel', async () => {
+      const { serverId, moderator } = await seedServer();
+
+      const response = await moderator
+        .post(`/servers/${serverId}/channels`)
+        .send({ name: 'mods', isPrivate: true });
+
+      expect(response.status).toBe(201);
+    });
+
     it('follows the policy live: owner_only blocks a moderator, then everyone lets a member in', async () => {
       const { serverId, owner, moderator, member } = await seedServer();
       await owner
