@@ -234,7 +234,7 @@ describe('RequireCapabilityGuard', () => {
       await overrides.revoke(channelId, 'member', 'view');
 
       // Deliberately beyond #51's literal step 6 -- see the guard's own doc.
-      // Once #54 filters this channel out of the listing, a 403 here would
+      // The listing filters this channel out, so a 403 here would
       // confirm a channel the caller can never see listed.
       await expect(
         guard.canActivate(

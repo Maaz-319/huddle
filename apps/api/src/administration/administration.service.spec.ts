@@ -1,10 +1,16 @@
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
 import { FakeChannelMemberRepository } from '../../test/fakes/fake-channel-member-repository';
+import { FakeChannelOverrideRepository } from '../../test/fakes/fake-channel-override-repository';
 import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository';
 import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
-import { ForbiddenError, NotFoundError } from '../common/errors';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../common/errors';
 import { AdministrationService } from './administration.service';
 import { Role } from './membership-repository.interface';
 
@@ -17,6 +23,7 @@ describe('AdministrationService', () => {
   let invites: FakeInviteRepository;
   let channels: FakeChannelRepository;
   let channelMembers: FakeChannelMemberRepository;
+  let channelOverrides: FakeChannelOverrideRepository;
   let service: AdministrationService;
 
   beforeEach(() => {
@@ -26,14 +33,43 @@ describe('AdministrationService', () => {
     invites = new FakeInviteRepository(store);
     channels = new FakeChannelRepository(store);
     channelMembers = new FakeChannelMemberRepository(store);
+    channelOverrides = new FakeChannelOverrideRepository(store);
     service = new AdministrationService(
       servers,
       memberships,
       invites,
       channels,
       channelMembers,
+      channelOverrides,
     );
   });
+
+  /**
+   * A server owned by OWNER_ID, with OTHER_USER_ID seated in `role`. The
+   * policy is `everyone`, so the channel-creation guard's own question is
+   * always answered yes and the tests are about the rules on top of it.
+   */
+  async function seedServer(role: Role): Promise<bigint> {
+    const { server } = await servers.createWithOwner(
+      {
+        name: 'Huddle HQ',
+        iconUrl: null,
+        channelCreationPolicy: 'everyone',
+        memberInviteToggle: true,
+      },
+      OWNER_ID,
+    );
+
+    if (role !== 'owner') {
+      await memberships.create({
+        serverId: server.id,
+        userId: OTHER_USER_ID,
+        role,
+      });
+    }
+
+    return server.id;
+  }
 
   describe('createServer', () => {
     it('seats the creator as owner and applies the confirmed defaults', async () => {
@@ -390,29 +426,6 @@ describe('AdministrationService', () => {
   });
 
   describe('listChannels', () => {
-    /** A server with the caller seated in the given role. */
-    async function seedServer(role: Role): Promise<bigint> {
-      const { server } = await servers.createWithOwner(
-        {
-          name: 'Huddle HQ',
-          iconUrl: null,
-          channelCreationPolicy: 'everyone',
-          memberInviteToggle: true,
-        },
-        OWNER_ID,
-      );
-
-      if (role !== 'owner') {
-        await memberships.create({
-          serverId: server.id,
-          userId: OTHER_USER_ID,
-          role,
-        });
-      }
-
-      return server.id;
-    }
-
     it('returns every public channel to an ordinary member', async () => {
       const serverId = await seedServer('member');
       await channels.create({ serverId, name: 'general', isPrivate: false });
@@ -480,28 +493,91 @@ describe('AdministrationService', () => {
       ).resolves.toEqual([]);
     });
 
-    it('makes one bulk membership read, not one per channel', async () => {
+    it('hides a public channel whose view a member has lost', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      // Absent, not flagged: a flagged entry leaks the name and the
+      // existence, which is the thing hiding is for.
+      expect(listed.map((channel) => channel.name)).toEqual(['general']);
+    });
+
+    it('takes it from that role only', async () => {
+      const serverId = await seedServer('moderator');
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const asModerator = await service.listChannels(serverId, OTHER_USER_ID);
+      const asOwner = await service.listChannels(serverId, OWNER_ID);
+
+      // The revocation names `member`. A blanket-deny bug passes the member
+      // case above on its own, so both other roles are asserted here.
+      expect(asModerator.map((channel) => channel.name)).toEqual(['staff']);
+      expect(asOwner.map((channel) => channel.name)).toEqual(['staff']);
+    });
+
+    it('leaves the owner untouched by an override naming their own channel', async () => {
+      const serverId = await seedServer('owner');
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      // Every role that *can* be overridden, revoked at once. An owner
+      // override is unrepresentable, which is the point.
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+      await channelOverrides.revoke(gated.id, 'moderator', 'view');
+
+      await expect(
+        service.listChannels(serverId, OWNER_ID),
+      ).resolves.toHaveLength(1);
+    });
+
+    it('reads both channel-scoped tables in bulk, never once per channel', async () => {
       const serverId = await seedServer('member');
       await channels.create({ serverId, name: 'a', isPrivate: true });
       await channels.create({ serverId, name: 'b', isPrivate: true });
-      await channels.create({ serverId, name: 'c', isPrivate: true });
-      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
-      const single = jest.spyOn(channelMembers, 'isMember');
+      await channels.create({ serverId, name: 'c', isPrivate: false });
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
+      const perChannelMember = jest.spyOn(channelMembers, 'isMember');
+      const perChannelOverride = jest.spyOn(
+        channelOverrides,
+        'findByChannelId',
+      );
 
       await service.listChannels(serverId, OTHER_USER_ID);
 
-      expect(bulk).toHaveBeenCalledTimes(1);
-      expect(single).not.toHaveBeenCalled();
+      expect(bulkMembers).toHaveBeenCalledTimes(1);
+      expect(bulkOverrides).toHaveBeenCalledTimes(1);
+      expect(perChannelMember).not.toHaveBeenCalled();
+      expect(perChannelOverride).not.toHaveBeenCalled();
     });
 
-    it('makes no membership read at all when the server has no private channels', async () => {
-      const serverId = await seedServer('member');
-      await channels.create({ serverId, name: 'general', isPrivate: false });
-      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+    it('makes no channel-scoped read at all for the owner', async () => {
+      const serverId = await seedServer('owner');
+      await channels.create({ serverId, name: 'a', isPrivate: true });
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
 
-      await service.listChannels(serverId, OTHER_USER_ID);
+      await service.listChannels(serverId, OWNER_ID);
 
-      expect(bulk).not.toHaveBeenCalled();
+      // The owner bypass is a rule, not an optimisation -- it returns before
+      // either table is consulted.
+      expect(bulkMembers).not.toHaveBeenCalled();
+      expect(bulkOverrides).not.toHaveBeenCalled();
     });
   });
 
@@ -517,17 +593,392 @@ describe('AdministrationService', () => {
         OWNER_ID,
       );
 
-      const channel = await service.createChannel({
-        serverId: server.id,
+      const channel = await service.createChannel(
+        { serverId: server.id, name: 'mods', isPrivate: true },
+        OWNER_ID,
+      );
+
+      // The creator gets no ChannelMember row -- they reach the channel
+      // through their server role, and membership is managed by its own
+      // routes.
+      await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('refuses a member making a private channel, whatever the policy says', async () => {
+      // `everyone` lets this member create channels at all -- that is the
+      // guard's question, and it passes. Privacy is the separate question
+      // PRD section 5 answers Owner and Moderator only.
+      const serverId = await seedServer('member');
+
+      await expect(
+        service.createChannel(
+          { serverId, name: 'secret', isPrivate: true },
+          OTHER_USER_ID,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+
+      await expect(channels.findByServerId(serverId)).resolves.toEqual([]);
+    });
+
+    it('lets that same member make a public channel', async () => {
+      const serverId = await seedServer('member');
+
+      const channel = await service.createChannel(
+        { serverId, name: 'general', isPrivate: false },
+        OTHER_USER_ID,
+      );
+
+      expect(channel.isPrivate).toBe(false);
+    });
+
+    it('lets a moderator make a private channel', async () => {
+      const serverId = await seedServer('moderator');
+
+      const channel = await service.createChannel(
+        { serverId, name: 'mods', isPrivate: true },
+        OTHER_USER_ID,
+      );
+
+      expect(channel.isPrivate).toBe(true);
+    });
+
+    it('makes no membership read at all for a public channel', async () => {
+      const serverId = await seedServer('member');
+      const read = jest.spyOn(memberships, 'findByServerAndUser');
+
+      await service.createChannel(
+        { serverId, name: 'general', isPrivate: false },
+        OTHER_USER_ID,
+      );
+
+      // The extra read is the price of the privacy rule, so it is only paid
+      // when the request actually asks for privacy.
+      expect(read).not.toHaveBeenCalled();
+    });
+  });
+  describe('updateChannel', () => {
+    it('renames a channel', async () => {
+      const serverId = await seedServer('owner');
+      const channel = await channels.create({
+        serverId,
+        name: 'genral',
+        isPrivate: false,
+      });
+
+      const renamed = await service.updateChannel(channel.id, {
+        name: 'general',
+      });
+
+      expect(renamed.name).toBe('general');
+      await expect(channels.findById(channel.id)).resolves.toMatchObject({
+        name: 'general',
+      });
+    });
+
+    it('refuses a rename onto a name the server already uses', async () => {
+      const serverId = await seedServer('owner');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const other = await channels.create({
+        serverId,
+        name: 'random',
+        isPrivate: false,
+      });
+
+      await expect(
+        service.updateChannel(other.id, { name: 'general' }),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it('keeps the member list when a private channel is made public', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(channel.id, OTHER_USER_ID);
+
+      await service.updateChannel(channel.id, { isPrivate: false });
+
+      // Inert while public, and meaningful again on the way back -- deleting
+      // them here would destroy the list on a misclick.
+      await expect(
+        channelMembers.isMember(channel.id, OTHER_USER_ID),
+      ).resolves.toBe(true);
+    });
+
+    it('restores the same member list when it is made private again', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(channel.id, OTHER_USER_ID);
+
+      await service.updateChannel(channel.id, { isPrivate: false });
+      await service.updateChannel(channel.id, { isPrivate: true });
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+      expect(listed.map((c) => c.name)).toEqual(['mods']);
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.updateChannel(999000000000000001n, { name: 'general' }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('deleteChannel', () => {
+    it('removes the channel', async () => {
+      const serverId = await seedServer('owner');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await service.deleteChannel(channel.id);
+
+      await expect(channels.findById(channel.id)).resolves.toBeNull();
+    });
+
+    it('rejects an id nobody holds', async () => {
+      await expect(
+        service.deleteChannel(999000000000000001n),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+  describe('channel members', () => {
+    /** A private channel in a server the caller is a plain member of. */
+    async function seedPrivateChannel(): Promise<{
+      serverId: bigint;
+      channelId: bigint;
+    }> {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
         name: 'mods',
         isPrivate: true,
       });
 
-      // The creator gets no ChannelMember row -- they reach the channel
-      // through their server role, and #52 owns membership management.
+      return { serverId, channelId: channel.id };
+    }
+
+    it('seats a server member', async () => {
+      const { channelId } = await seedPrivateChannel();
+
+      const member = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      expect(member).toMatchObject({ channelId, userId: OTHER_USER_ID });
+      await expect(
+        channelMembers.isMember(channelId, OTHER_USER_ID),
+      ).resolves.toBe(true);
+    });
+
+    it('re-adding returns the original row and leaves exactly one', async () => {
+      const { channelId } = await seedPrivateChannel();
+      const first = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      const second = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      // Sliding addedAt forward would quietly rewrite when they joined.
+      expect(second.addedAt).toEqual(first.addedAt);
+      await expect(service.listChannelMembers(channelId)).resolves.toHaveLength(
+        1,
+      );
+    });
+
+    it("refuses a user who is not in the channel's server", async () => {
+      const { channelId } = await seedPrivateChannel();
+      const outsider = 300000000000000009n;
+
+      await expect(
+        service.addChannelMember(channelId, outsider),
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      // Channel membership narrows server membership; it is never a way in.
+      await expect(channelMembers.isMember(channelId, outsider)).resolves.toBe(
+        false,
+      );
+    });
+
+    it('refuses an add to a public channel', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await expect(
+        service.addChannelMember(channel.id, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(ValidationError);
+
       await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
         [],
       );
+    });
+
+    it('lists an empty member list for a public channel rather than throwing', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await expect(service.listChannelMembers(channel.id)).resolves.toEqual([]);
+    });
+
+    it('removes a seated member', async () => {
+      const { channelId } = await seedPrivateChannel();
+      await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      await service.removeChannelMember(channelId, OTHER_USER_ID);
+
+      await expect(
+        channelMembers.isMember(channelId, OTHER_USER_ID),
+      ).resolves.toBe(false);
+    });
+
+    it('removing someone who is not there is a no-op, not a throw', async () => {
+      const { channelId } = await seedPrivateChannel();
+
+      await expect(
+        service.removeChannelMember(channelId, OTHER_USER_ID),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses an add to a channel id nobody holds', async () => {
+      await expect(
+        service.addChannelMember(999000000000000001n, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+  describe('channel overrides', () => {
+    async function seedChannel(): Promise<bigint> {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      return channel.id;
+    }
+
+    it('records a revocation', async () => {
+      const channelId = await seedChannel();
+
+      await service.revokeCapability(channelId, 'member', 'post');
+
+      await expect(service.listChannelOverrides(channelId)).resolves.toEqual([
+        { channelId, role: 'member', capability: 'post' },
+      ]);
+    });
+
+    it('revoking twice leaves one row', async () => {
+      const channelId = await seedChannel();
+
+      await service.revokeCapability(channelId, 'moderator', 'delete_others');
+      await service.revokeCapability(channelId, 'moderator', 'delete_others');
+
+      await expect(
+        service.listChannelOverrides(channelId),
+      ).resolves.toHaveLength(1);
+    });
+
+    it('restores by removing the row', async () => {
+      const channelId = await seedChannel();
+      await service.revokeCapability(channelId, 'member', 'post');
+
+      await service.restoreCapability(channelId, 'member', 'post');
+
+      await expect(service.listChannelOverrides(channelId)).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('restoring something never revoked is a no-op', async () => {
+      const channelId = await seedChannel();
+
+      await expect(
+        service.restoreCapability(channelId, 'member', 'view'),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['moderator', 'view'],
+      ['moderator', 'post'],
+      ['moderator', 'delete_others'],
+      ['moderator', 'manage_settings'],
+      ['member', 'view'],
+      ['member', 'post'],
+    ] as const)('accepts %s + %s', async (role, capability) => {
+      const channelId = await seedChannel();
+
+      await expect(
+        service.revokeCapability(channelId, role, capability),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each(['delete_others', 'manage_settings'] as const)(
+      'refuses member + %s as a no-op tighten',
+      async (capability) => {
+        const channelId = await seedChannel();
+
+        // A Member holds neither server-wide, so the row would revoke
+        // something that was never held.
+        await expect(
+          service.revokeCapability(channelId, 'member', capability),
+        ).rejects.toBeInstanceOf(ValidationError);
+
+        await expect(service.listChannelOverrides(channelId)).resolves.toEqual(
+          [],
+        );
+      },
+    );
+
+    it('names the reason in the refusal, not just "invalid"', async () => {
+      const channelId = await seedChannel();
+
+      // A client sending this has a specific misunderstanding, and only the
+      // reason fixes it.
+      await expect(
+        service.revokeCapability(channelId, 'member', 'manage_settings'),
+      ).rejects.toThrow(
+        'A member does not hold manage_settings server-wide, so there is nothing to revoke',
+      );
+    });
+
+    it('lets a no-op pair be restored without complaint', async () => {
+      const channelId = await seedChannel();
+
+      // The write is refused, so the row cannot exist; refusing the delete
+      // too would fail a cleanup call for a reason the caller cannot act on.
+      await expect(
+        service.restoreCapability(channelId, 'member', 'manage_settings'),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['listChannelOverrides'],
+      ['revokeCapability'],
+      ['restoreCapability'],
+    ])('rejects a channel id nobody holds from %s', async (method) => {
+      const unknown = 999000000000000001n;
+      const call =
+        method === 'listChannelOverrides'
+          ? service.listChannelOverrides(unknown)
+          : method === 'revokeCapability'
+            ? service.revokeCapability(unknown, 'member', 'post')
+            : service.restoreCapability(unknown, 'member', 'post');
+
+      await expect(call).rejects.toBeInstanceOf(NotFoundError);
     });
   });
 });

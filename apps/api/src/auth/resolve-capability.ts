@@ -55,7 +55,7 @@ const ALLOWED: CapabilityDecision = { allowed: true };
 /**
  * The whole of the effective-capability rule, as a pure function.
  *
- * Extracted from the guard so the guard and #54's view-filtered channel
+ * Extracted from the guard so the guard and the view-filtered channel
  * listing decide the same way. Two copies of a permission rule is how they
  * drift.
  *

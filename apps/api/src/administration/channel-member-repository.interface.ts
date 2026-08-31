@@ -53,8 +53,7 @@ export abstract class ChannelMemberRepository {
    *
    * It exists so a whole server's channel list can be filtered in one query
    * instead of one `isMember` call per channel — the read the channel listing
-   * makes on every request, and the one #54 will make again. An empty input
-   * list makes no query at all.
+   * makes on every request. An empty input list makes no query at all.
    */
   abstract findChannelIdsForUser(
     channelIds: bigint[],

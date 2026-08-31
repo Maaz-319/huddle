@@ -12,8 +12,10 @@ import { PrismaServerRepository } from './adapters/prisma-server-repository.adap
 import { AdministrationController } from './administration.controller';
 import { AdministrationService } from './administration.service';
 import { ChannelDetailController } from './channel-detail.controller';
+import { ChannelMemberController } from './channel-member.controller';
 import { ChannelController } from './channel.controller';
 import { ChannelMemberRepository } from './channel-member-repository.interface';
+import { ChannelOverrideController } from './channel-override.controller';
 import { ChannelOverrideRepository } from './channel-override-repository.interface';
 import { ChannelRepository } from './channel-repository.interface';
 import { InviteController } from './invite.controller';
@@ -25,7 +27,7 @@ import { ServerRepository } from './server-repository.interface';
  * Servers, membership, invites, and channels. `ServerRepository`/
  * `MembershipRepository` are the ports #36–#37 build server-level authority
  * on top of; `InviteRepository` is what #46–#48 build joining on top of;
- * `ChannelRepository` is what #49–#52 build channels on top of, with
+ * `ChannelRepository` is what the channel routes build on, with
  * `ChannelMemberRepository` and `ChannelOverrideRepository` holding the two
  * halves of per-channel permission data that `@RequireCapability` reads.
  *
@@ -46,6 +48,8 @@ import { ServerRepository } from './server-repository.interface';
     InviteController,
     ChannelController,
     ChannelDetailController,
+    ChannelMemberController,
+    ChannelOverrideController,
   ],
   providers: [
     { provide: ServerRepository, useClass: PrismaServerRepository },
