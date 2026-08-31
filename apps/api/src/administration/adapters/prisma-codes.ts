@@ -7,6 +7,16 @@ export const RECORD_NOT_FOUND = 'P2025';
 /** Prisma's code for "a unique constraint would be violated". */
 export const UNIQUE_VIOLATION = 'P2002';
 
+/**
+ * Prisma's code for "a foreign key constraint would be violated".
+ *
+ * Reached when a write names a parent row that has since been deleted — a
+ * message posted into a channel that was removed between the guard's read and
+ * the insert. Unmapped it would surface as a 500; the honest answer is that
+ * the parent is gone.
+ */
+export const FOREIGN_KEY_VIOLATION = 'P2003';
+
 /** How many fresh codes a colliding write will try before giving up. */
 const MAX_CODE_ATTEMPTS = 5;
 
