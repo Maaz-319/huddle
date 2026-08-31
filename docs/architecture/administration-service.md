@@ -43,12 +43,14 @@ Out of scope (this doc): permission *enforcement* (checking a resolved role/capa
   (No arbitrary hand-picked member list — collapsed to these three options to avoid unnecessary complexity.)
 - **Rename / delete:** owner and moderators, by default — subject to being tightened per channel via the "manage-channel-settings" override (§4).
 - **Visibility:** a channel can be toggled **private/invite-only**; private channels are **fully hidden** from non-members (do not appear in their channel list at all).
+- **Who may make a channel private:** the Owner and Moderators only, per PRD §5 — a question separate from the creation policy above. Under an `everyone` policy an ordinary Member may create channels, and is still refused if the request asks for a private one. Toggling an existing channel needs manage-channel-settings, which a Member never holds, so the same rule falls out of the guard there.
+- **Flipping private → public keeps the channel's member list.** The `ChannelMember` rows go inert while the channel is public — nothing reads them — and mean the same thing again if it is flipped back. Deleting them on the flip would destroy the list on a misclick with nothing to rebuild it from.
 
 ---
 
 ## 4. Channel-Level Capability Overrides
 
-- The owner can set, **per channel and per role (Moderator, Member)**, an override on each of four capabilities:
+- Anyone holding **manage-channel-settings on that channel** can set, **per channel and per role (Moderator, Member)**, an override on each of four capabilities:
 
   | Capability | Covers |
   |---|---|
@@ -58,8 +60,30 @@ Out of scope (this doc): permission *enforcement* (checking a resolved role/capa
   | **Manage-channel-settings** | Bundle: rename, delete, toggle private/public, edit this channel's own overrides, and (for private channels) add/remove members |
 
 - Overrides can only **tighten**, never loosen, the server-wide default for that role (FR-13) — a channel cannot grant a Member delete rights they don't have server-wide, and cannot loosen a private server's channel to be more open than the server default.
-- **Defaults:** Moderators have full delete-others'-messages and manage-channel-settings rights on every channel, unless the owner explicitly tightens (revokes) that right on a specific channel. Members follow the server-wide Member defaults (§5 of the PRD) unless tightened per channel.
-- **Private-channel membership:** add/remove is part of manage-channel-settings — anyone (owner or mod) holding that capability on a given private channel can add/remove its members. A user must already be a server member (via the server invite) before they can be added to any channel, private or not.
+- **Defaults:** Moderators have full delete-others'-messages and manage-channel-settings rights on every channel, unless that right is explicitly tightened (revoked) on a specific channel. Members follow the server-wide Member defaults (§5 of the PRD) unless tightened per channel.
+- **Private-channel membership:** add/remove is part of manage-channel-settings — anyone (owner or mod) holding that capability on a given private channel can add/remove its members. A user must already be a server member (via the server invite) before they can be added to any channel, private or not. Adding a member to a *public* channel is refused: `ChannelMember` rows exist only for private channels (data-model.md §4.5), so the row would be data nothing ever reads.
+
+### Who may write an override
+
+The Owner always, and a Moderator on any channel where `manage_settings` has not
+been revoked for `moderator` — PRD §5 gives "Apply channel-level overrides" to
+both roles, and this doc puts "edit this channel's own overrides" inside the
+manage-settings bundle. So all three override routes carry the same
+`@RequireCapability('manage_settings')` as the rename, delete and membership
+routes; the bundle is not split.
+
+A Moderator can therefore revoke `manage_settings` from `moderator` on a channel,
+locking their peers and themselves out of that channel's settings. **That is the
+intended consequence of the capability being a bundle, not a bug** — and it is
+recoverable, because the Owner is never overridable and can always delete the
+row.
+
+The write API cannot grant, by shape rather than by check: `PUT` only ever
+creates a revocation row, the table has no value column, `DELETE` removes a
+tightening rather than raising anyone above their server-wide default, and no
+endpoint's success widens a capability. The two write-time refusals — `owner` as
+a role, and `member` paired with `delete_others` or `manage_settings` — only
+close the remaining no-op cases.
 
 ### Default capabilities by role
 
@@ -128,4 +152,4 @@ manage settings can already see the channel, so there is nothing left to hide.
 
 - Invite link **expiration** and **max-use limits** (noted as future enhancements in the PRD, §12) — not built now; single permanent link only.
 - Whether any confirmation/notification is sent to a member when they're promoted, demoted, or made owner — not yet specified.
-- Authoritative RBAC rule schema (how per-channel overrides are actually stored/queried) — to be finalized in the future data model file, alongside the Chat Service's message schema.
+- **Closed:** authoritative RBAC rule schema (how per-channel overrides are actually stored/queried). Overrides are `ChannelOverride` rows — `(channelId, role, capability)`, no value column, the row's existence *is* the revocation (data-model.md §4.6). They are read through `ChannelOverrideRepository` (`findByChannelId` for a single request, `findByChannelIds` for the channel listing's bulk pass) and written through the routes in §4. Resolution is one pure function, `resolveCapability` in `apps/api/src/auth/resolve-capability.ts`: owner bypass, then private-channel membership, then the role's server-wide default, then the override rows. `RequireCapabilityGuard` and the channel listing both call it, so a request and a listing cannot disagree about what a caller may see.
