@@ -20,13 +20,13 @@ export class CreateChannelDto {
    * Whether the channel is private, i.e. hidden from everyone without a
    * `ChannelMember` row (administration-service.md section 3).
    *
-   * Note a tension with PRD section 5, which lists "Make a channel private"
-   * as Owner and Moderator only: this route gates creation on the server's
-   * `channelCreationPolicy` alone, so under an `everyone` policy an ordinary
-   * Member can create a private channel. #49 specifies it this way
-   * deliberately and #52 is where channel-settings authority is decided, so
-   * that is where the two should be reconciled — not here, by inventing a
-   * rule no ticket asked for.
+   * `true` is refused for an ordinary Member, whatever the server's
+   * `channelCreationPolicy` says: PRD section 5 lists "Make a channel
+   * private" as Owner and Moderator only, and that is a different question
+   * from who may create a channel at all. The check is not here — it needs
+   * the caller's role, which a DTO has no access to — but in
+   * `AdministrationService.createChannel`, which is also where the reasoning
+   * is written down.
    */
   @IsBoolean()
   isPrivate!: boolean;

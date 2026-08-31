@@ -35,6 +35,33 @@ describe('AdministrationService', () => {
     );
   });
 
+  /**
+   * A server owned by OWNER_ID, with OTHER_USER_ID seated in `role`. The
+   * policy is `everyone`, so the channel-creation guard's own question is
+   * always answered yes and the tests are about the rules on top of it.
+   */
+  async function seedServer(role: Role): Promise<bigint> {
+    const { server } = await servers.createWithOwner(
+      {
+        name: 'Huddle HQ',
+        iconUrl: null,
+        channelCreationPolicy: 'everyone',
+        memberInviteToggle: true,
+      },
+      OWNER_ID,
+    );
+
+    if (role !== 'owner') {
+      await memberships.create({
+        serverId: server.id,
+        userId: OTHER_USER_ID,
+        role,
+      });
+    }
+
+    return server.id;
+  }
+
   describe('createServer', () => {
     it('seats the creator as owner and applies the confirmed defaults', async () => {
       const server = await service.createServer(OWNER_ID, {
@@ -390,29 +417,6 @@ describe('AdministrationService', () => {
   });
 
   describe('listChannels', () => {
-    /** A server with the caller seated in the given role. */
-    async function seedServer(role: Role): Promise<bigint> {
-      const { server } = await servers.createWithOwner(
-        {
-          name: 'Huddle HQ',
-          iconUrl: null,
-          channelCreationPolicy: 'everyone',
-          memberInviteToggle: true,
-        },
-        OWNER_ID,
-      );
-
-      if (role !== 'owner') {
-        await memberships.create({
-          serverId: server.id,
-          userId: OTHER_USER_ID,
-          role,
-        });
-      }
-
-      return server.id;
-    }
-
     it('returns every public channel to an ordinary member', async () => {
       const serverId = await seedServer('member');
       await channels.create({ serverId, name: 'general', isPrivate: false });
@@ -517,17 +521,69 @@ describe('AdministrationService', () => {
         OWNER_ID,
       );
 
-      const channel = await service.createChannel({
-        serverId: server.id,
-        name: 'mods',
-        isPrivate: true,
-      });
+      const channel = await service.createChannel(
+        { serverId: server.id, name: 'mods', isPrivate: true },
+        OWNER_ID,
+      );
 
       // The creator gets no ChannelMember row -- they reach the channel
-      // through their server role, and #52 owns membership management.
+      // through their server role, and membership is managed by its own
+      // routes.
       await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
         [],
       );
+    });
+
+    it('refuses a member making a private channel, whatever the policy says', async () => {
+      // `everyone` lets this member create channels at all -- that is the
+      // guard's question, and it passes. Privacy is the separate question
+      // PRD section 5 answers Owner and Moderator only.
+      const serverId = await seedServer('member');
+
+      await expect(
+        service.createChannel(
+          { serverId, name: 'secret', isPrivate: true },
+          OTHER_USER_ID,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+
+      await expect(channels.findByServerId(serverId)).resolves.toEqual([]);
+    });
+
+    it('lets that same member make a public channel', async () => {
+      const serverId = await seedServer('member');
+
+      const channel = await service.createChannel(
+        { serverId, name: 'general', isPrivate: false },
+        OTHER_USER_ID,
+      );
+
+      expect(channel.isPrivate).toBe(false);
+    });
+
+    it('lets a moderator make a private channel', async () => {
+      const serverId = await seedServer('moderator');
+
+      const channel = await service.createChannel(
+        { serverId, name: 'mods', isPrivate: true },
+        OTHER_USER_ID,
+      );
+
+      expect(channel.isPrivate).toBe(true);
+    });
+
+    it('makes no membership read at all for a public channel', async () => {
+      const serverId = await seedServer('member');
+      const read = jest.spyOn(memberships, 'findByServerAndUser');
+
+      await service.createChannel(
+        { serverId, name: 'general', isPrivate: false },
+        OTHER_USER_ID,
+      );
+
+      // The extra read is the price of the privacy rule, so it is only paid
+      // when the request actually asks for privacy.
+      expect(read).not.toHaveBeenCalled();
     });
   });
 });

@@ -49,6 +49,10 @@ export class ChannelController {
    * Who may call this is the server's own `channelCreationPolicy`, which is
    * per-server row data — hence `RequireChannelCreationGuard` rather than
    * `@RequireRole`, whose allowed roles are baked in at the call site.
+   *
+   * Whether the *created* channel may be private is a second question the
+   * guard cannot answer, because it never sees the body — see
+   * `AdministrationService.createChannel`.
    */
   @Post()
   @UseGuards(RequireChannelCreationGuard)
@@ -57,12 +61,16 @@ export class ChannelController {
   async create(
     @Param('serverId', ParseSnowflakePipe) serverId: bigint,
     @Body() dto: CreateChannelDto,
+    @CurrentUser() user: User,
   ): Promise<ChannelResponse> {
-    const channel = await this.administration.createChannel({
-      serverId,
-      name: dto.name,
-      isPrivate: dto.isPrivate,
-    });
+    const channel = await this.administration.createChannel(
+      {
+        serverId,
+        name: dto.name,
+        isPrivate: dto.isPrivate,
+      },
+      user.id,
+    );
 
     return toChannelResponse(channel);
   }

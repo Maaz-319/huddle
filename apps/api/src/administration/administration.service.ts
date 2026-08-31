@@ -354,15 +354,47 @@ export class AdministrationService {
   }
 
   /**
-   * Creates a channel in a server. Authorization — whether this caller's role
-   * is one the server's `channelCreationPolicy` admits — already happened in
+   * Creates a channel in a server. Whether this caller's role is one the
+   * server's `channelCreationPolicy` admits already happened in
    * `RequireChannelCreationGuard`.
+   *
+   * What the guard cannot answer is who may create a *private* one. PRD
+   * section 5 gives "Make a channel private" to the Owner and Moderator only,
+   * and that is a different question from who may create a channel at all —
+   * under an `everyone` policy an ordinary Member may create channels and
+   * still must not be able to make one private. The guard never sees the
+   * body, so the rule lands here, and it costs one membership read on a route
+   * budgeted at three calls a minute.
+   *
+   * `ForbiddenError` rather than `ValidationError`: the body is well-formed,
+   * and the refusal is about who the caller is — the same thing
+   * `@RequireCapability` answers with a 403.
    *
    * Throws `ConflictError` if the server already holds a channel of that
    * name. The uniqueness is per server, so the same name in a different
    * server is fine.
    */
-  async createChannel(input: CreateChannelInput): Promise<Channel> {
+  async createChannel(
+    input: CreateChannelInput,
+    callerId: bigint,
+  ): Promise<Channel> {
+    if (input.isPrivate) {
+      const membership = await this.memberships.findByServerAndUser(
+        input.serverId,
+        callerId,
+      );
+
+      // RequireChannelCreationGuard has already rejected a non-member, so a
+      // null here would mean this method was reached without it -- a wiring
+      // bug, answered the same way the guard would have answered it.
+      if (membership === null || membership.role === 'member') {
+        throw new ForbiddenError(
+          'Only an owner or moderator can create a private channel',
+          { serverId: input.serverId.toString() },
+        );
+      }
+    }
+
     return this.channels.create(input);
   }
 
