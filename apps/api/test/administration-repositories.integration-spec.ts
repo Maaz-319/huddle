@@ -9,6 +9,7 @@ import { PrismaServerRepository } from '../src/administration/adapters/prisma-se
 import { ChannelMemberRepository } from '../src/administration/channel-member-repository.interface';
 import { ChannelOverrideRepository } from '../src/administration/channel-override-repository.interface';
 import { ChannelRepository } from '../src/administration/channel-repository.interface';
+import { AdministrationService } from '../src/administration/administration.service';
 import * as inviteCode from '../src/administration/invite-code';
 import { InviteRepository } from '../src/administration/invite-repository.interface';
 import { MembershipRepository } from '../src/administration/membership-repository.interface';
@@ -414,6 +415,140 @@ describe('the administration Prisma adapters', () => {
           where: { serverId: SERVER_ID, role: 'owner' },
         }),
       ).resolves.toBe(1);
+    });
+  });
+  /**
+   * The listing's read count, against real Postgres.
+   *
+   * The claim under test is that `listChannels` does a **bounded** number of
+   * reads — never one per channel, which would be N+1 on the most-hit read in
+   * the app. It is asserted by counting calls into the ports, with the real
+   * Prisma adapters underneath, so real SQL runs throughout. Each of the four
+   * calls is one statement in these adapters, so the port count and the
+   * statement count are the same number here; that is worth stating rather
+   * than leaving a reader to assume it.
+   *
+   * `jest.spyOn` on the adapter instances rather than hand-written counting
+   * wrappers: it counts the same thing with nothing new to keep in step with
+   * the ports.
+   */
+  describe('the channel listing does a bounded number of reads', () => {
+    const LISTING_SERVER_ID = 810000000000000001n;
+    const LISTING_OWNER_ID = 810000000000000002n;
+    const LISTING_CALLER_ID = 810000000000000003n;
+
+    let service: AdministrationService;
+
+    beforeEach(async () => {
+      await truncateAll(prisma);
+      await prisma.user.createMany({
+        data: [userFixture(LISTING_OWNER_ID), userFixture(LISTING_CALLER_ID)],
+      });
+      await prisma.server.create({
+        data: serverFixture(LISTING_SERVER_ID),
+      });
+      await prisma.membership.createMany({
+        data: [
+          {
+            serverId: LISTING_SERVER_ID,
+            userId: LISTING_OWNER_ID,
+            role: 'owner',
+          },
+          {
+            serverId: LISTING_SERVER_ID,
+            userId: LISTING_CALLER_ID,
+            role: 'member',
+          },
+        ],
+      });
+
+      service = new AdministrationService(
+        servers,
+        memberships,
+        invites,
+        channels,
+        channelMembers,
+        channelOverrides,
+      );
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    /** `count` channels, every third one private, every fifth overridden. */
+    async function seedChannels(count: number): Promise<void> {
+      for (let index = 0; index < count; index += 1) {
+        const channel = await channels.create({
+          serverId: LISTING_SERVER_ID,
+          name: `channel-${index}`,
+          isPrivate: index % 3 === 0,
+        });
+
+        if (index % 5 === 0) {
+          await channelOverrides.revoke(channel.id, 'member', 'view');
+        }
+      }
+    }
+
+    function countReads() {
+      return {
+        byServer: jest.spyOn(channels, 'findByServerId'),
+        membership: jest.spyOn(memberships, 'findByServerAndUser'),
+        bulkMembers: jest.spyOn(channelMembers, 'findChannelIdsForUser'),
+        bulkOverrides: jest.spyOn(channelOverrides, 'findByChannelIds'),
+        perChannelMember: jest.spyOn(channelMembers, 'isMember'),
+        perChannelOverride: jest.spyOn(channelOverrides, 'findByChannelId'),
+      };
+    }
+
+    it.each([[1], [20]])(
+      'reads four times over a server of %i channels',
+      async (count) => {
+        await seedChannels(count);
+        const reads = countReads();
+
+        await service.listChannels(LISTING_SERVER_ID, LISTING_CALLER_ID);
+
+        expect(reads.byServer).toHaveBeenCalledTimes(1);
+        expect(reads.membership).toHaveBeenCalledTimes(1);
+        expect(reads.bulkMembers).toHaveBeenCalledTimes(1);
+        expect(reads.bulkOverrides).toHaveBeenCalledTimes(1);
+        // The per-channel reads are the N+1 the bulk methods exist to avoid.
+        expect(reads.perChannelMember).not.toHaveBeenCalled();
+        expect(reads.perChannelOverride).not.toHaveBeenCalled();
+      },
+    );
+
+    it('still filters correctly at twenty channels', async () => {
+      await seedChannels(20);
+
+      const listed = await service.listChannels(
+        LISTING_SERVER_ID,
+        LISTING_CALLER_ID,
+      );
+
+      // Bounded reads are worth nothing if the answer is wrong. Of the
+      // twenty, indices 0/3/6/9/12/15/18 are private with no member row, and
+      // 5 and 10 are public with `view` revoked for `member` (0 and 15 are
+      // overridden too, but were already hidden). The other eleven are
+      // visible. Asserted by name, not by count, so a wrong answer of the
+      // right size still fails.
+      expect(listed.map((channel) => channel.name).sort()).toEqual(
+        [
+          'channel-1',
+          'channel-11',
+          'channel-13',
+          'channel-14',
+          'channel-16',
+          'channel-17',
+          'channel-19',
+          'channel-2',
+          'channel-4',
+          'channel-7',
+          'channel-8',
+        ].sort(),
+      );
     });
   });
 });
