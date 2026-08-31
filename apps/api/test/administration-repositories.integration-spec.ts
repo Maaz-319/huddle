@@ -1,14 +1,34 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaChannelMemberRepository } from '../src/administration/adapters/prisma-channel-member-repository.adapter';
+import { PrismaChannelOverrideRepository } from '../src/administration/adapters/prisma-channel-override-repository.adapter';
+import { PrismaChannelRepository } from '../src/administration/adapters/prisma-channel-repository.adapter';
 import { PrismaInviteRepository } from '../src/administration/adapters/prisma-invite-repository.adapter';
 import { PrismaMembershipRepository } from '../src/administration/adapters/prisma-membership-repository.adapter';
 import { PrismaServerRepository } from '../src/administration/adapters/prisma-server-repository.adapter';
+import { ChannelMemberRepository } from '../src/administration/channel-member-repository.interface';
+import { ChannelOverrideRepository } from '../src/administration/channel-override-repository.interface';
+import { ChannelRepository } from '../src/administration/channel-repository.interface';
 import * as inviteCode from '../src/administration/invite-code';
 import { InviteRepository } from '../src/administration/invite-repository.interface';
 import { MembershipRepository } from '../src/administration/membership-repository.interface';
 import { ServerRepository } from '../src/administration/server-repository.interface';
+import { ConflictError } from '../src/common/errors';
 import { PrismaService } from '../src/common/prisma.service';
 import { SnowflakeService } from '../src/common/snowflake.service';
+import {
+  CHANNEL_MEMBER_OTHER_ID,
+  CHANNEL_MEMBER_OWNER_ID,
+  describeChannelMemberRepositoryContract,
+} from './fakes/channel-member-repository.contract';
+import {
+  CHANNEL_OVERRIDE_OWNER_ID,
+  describeChannelOverrideRepositoryContract,
+} from './fakes/channel-override-repository.contract';
+import {
+  CHANNEL_OWNER_ID,
+  describeChannelRepositoryContract,
+} from './fakes/channel-repository.contract';
 import {
   describeInviteRepositoryContract,
   INVITE_OWNER_ID,
@@ -59,12 +79,15 @@ const GENERAL = {
  * are the same ones the fakes are held to; the cases below are the ones a
  * `Map` cannot express — real foreign keys, real transaction rollback.
  */
-describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepository', () => {
+describe('the administration Prisma adapters', () => {
   let module: TestingModule;
   let prisma: PrismaService;
   let servers: ServerRepository;
   let memberships: MembershipRepository;
   let invites: InviteRepository;
+  let channels: ChannelRepository;
+  let channelMembers: ChannelMemberRepository;
+  let channelOverrides: ChannelOverrideRepository;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -77,6 +100,15 @@ describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepo
         { provide: ServerRepository, useClass: PrismaServerRepository },
         { provide: MembershipRepository, useClass: PrismaMembershipRepository },
         { provide: InviteRepository, useClass: PrismaInviteRepository },
+        { provide: ChannelRepository, useClass: PrismaChannelRepository },
+        {
+          provide: ChannelMemberRepository,
+          useClass: PrismaChannelMemberRepository,
+        },
+        {
+          provide: ChannelOverrideRepository,
+          useClass: PrismaChannelOverrideRepository,
+        },
       ],
     }).compile();
 
@@ -85,6 +117,9 @@ describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepo
     servers = module.get(ServerRepository);
     memberships = module.get(MembershipRepository);
     invites = module.get(InviteRepository);
+    channels = module.get(ChannelRepository);
+    channelMembers = module.get(ChannelMemberRepository);
+    channelOverrides = module.get(ChannelOverrideRepository);
   });
 
   afterAll(async () => {
@@ -95,6 +130,9 @@ describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepo
     expect(servers).toBeInstanceOf(PrismaServerRepository);
     expect(memberships).toBeInstanceOf(PrismaMembershipRepository);
     expect(invites).toBeInstanceOf(PrismaInviteRepository);
+    expect(channels).toBeInstanceOf(PrismaChannelRepository);
+    expect(channelMembers).toBeInstanceOf(PrismaChannelMemberRepository);
+    expect(channelOverrides).toBeInstanceOf(PrismaChannelOverrideRepository);
   });
 
   describeServerRepositoryContract('PrismaServerRepository', async () => {
@@ -129,6 +167,41 @@ describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepo
     return { invites, servers };
   });
 
+  describeChannelRepositoryContract('PrismaChannelRepository', async () => {
+    await truncateAll(prisma);
+    // Channel.serverId is a real foreign key and the contract's servers are
+    // seated via createWithOwner, so the owner row has to exist first.
+    await prisma.user.create({ data: userFixture(CHANNEL_OWNER_ID) });
+    return { channels, servers };
+  });
+
+  describeChannelMemberRepositoryContract(
+    'PrismaChannelMemberRepository',
+    async () => {
+      await truncateAll(prisma);
+      // ChannelMember.userId is a real foreign key, unlike the fake, so both
+      // users the cases seat have to actually exist first.
+      await prisma.user.createMany({
+        data: [
+          userFixture(CHANNEL_MEMBER_OWNER_ID),
+          userFixture(CHANNEL_MEMBER_OTHER_ID),
+        ],
+      });
+      return { channelMembers, channels, servers };
+    },
+  );
+
+  describeChannelOverrideRepositoryContract(
+    'PrismaChannelOverrideRepository',
+    async () => {
+      await truncateAll(prisma);
+      await prisma.user.create({
+        data: userFixture(CHANNEL_OVERRIDE_OWNER_ID),
+      });
+      return { overrides: channelOverrides, channels, servers };
+    },
+  );
+
   describe('behaviour that needs a real database', () => {
     beforeEach(async () => {
       await truncateAll(prisma);
@@ -155,6 +228,83 @@ describe('PrismaServerRepository / PrismaMembershipRepository / PrismaInviteRepo
       await expect(
         prisma.invite.findUnique({ where: { serverId: created.id } }),
       ).resolves.toBeNull();
+    });
+
+    it('deleting a channel cascades its members and overrides away', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const { server } = await servers.createWithOwner(GENERAL, OWNER_ID);
+      const channel = await channels.create({
+        serverId: server.id,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(channel.id, OWNER_ID);
+      await channelOverrides.revoke(channel.id, 'member', 'post');
+
+      await channels.delete(channel.id);
+
+      // ChannelMember and ChannelOverride both cascade off Channel at the
+      // schema level (data-model.md section 7). Verified rather than assumed:
+      // without the referential action the delete would be rejected outright,
+      // so a passing delete plus empty tables is the whole proof.
+      await expect(prisma.channelMember.count()).resolves.toBe(0);
+      await expect(prisma.channelOverride.count()).resolves.toBe(0);
+    });
+
+    it('deleting a server cascades its channels away', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const { server } = await servers.createWithOwner(GENERAL, OWNER_ID);
+      const channel = await channels.create({
+        serverId: server.id,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await servers.delete(server.id);
+
+      // Channel cascades off Server at the schema level (data-model.md
+      // section 7). Without it the delete would be rejected outright, not
+      // silently orphan rows -- so this asserts the referential action, not
+      // just an absence.
+      await expect(channels.findById(channel.id)).resolves.toBeNull();
+    });
+
+    it('rejects a duplicate channel name as ConflictError, not a raw Prisma error', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const { server } = await servers.createWithOwner(GENERAL, OWNER_ID);
+      await channels.create({
+        serverId: server.id,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      // The real UNIQUE (serverId, name) index, not the fake's scan. A raw
+      // P2002 escaping here would surface as a 500 rather than a 409.
+      await expect(
+        channels.create({
+          serverId: server.id,
+          name: 'general',
+          isPrivate: false,
+        }),
+      ).rejects.toBeInstanceOf(ConflictError);
+    });
+
+    it('stores a channel id as a bigint', async () => {
+      await prisma.user.create({ data: userFixture(OWNER_ID) });
+      const { server } = await servers.createWithOwner(GENERAL, OWNER_ID);
+      const channel = await channels.create({
+        serverId: server.id,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      const row = await prisma.channel.findUnique({
+        where: { id: channel.id },
+      });
+
+      // A Number column would silently round a Snowflake rather than throw.
+      expect(typeof row?.id).toBe('bigint');
+      expect(typeof row?.serverId).toBe('bigint');
     });
 
     it('deleting a server cascades its invite away', async () => {
