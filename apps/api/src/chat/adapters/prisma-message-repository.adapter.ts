@@ -54,6 +54,37 @@ export class PrismaMessageRepository extends MessageRepository {
 
     return row === null ? null : toMessage(row);
   }
+
+  async findPageBefore(
+    channelId: bigint,
+    before: bigint | null,
+    limit: number,
+  ): Promise<Message[]> {
+    const rows = await this.prisma.message.findMany({
+      // `id: { lt: before }` is omitted rather than widened when there is no
+      // cursor: the first page is "the newest ones", not "everything before
+      // some sentinel".
+      where: { channelId, ...(before === null ? {} : { id: { lt: before } }) },
+      orderBy: { id: 'desc' },
+      take: limit,
+    });
+
+    return rows.map(toMessage);
+  }
+
+  async findPageAfter(
+    channelId: bigint,
+    after: bigint,
+    limit: number,
+  ): Promise<Message[]> {
+    const rows = await this.prisma.message.findMany({
+      where: { channelId, id: { gt: after } },
+      orderBy: { id: 'asc' },
+      take: limit,
+    });
+
+    return rows.map(toMessage);
+  }
 }
 
 /**
