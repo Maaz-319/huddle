@@ -5,8 +5,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { MESSAGE_CONTENT_MAX } from '../src/chat/send-message.dto';
+import { DEFAULT_PAGE_SIZE } from '../src/common/pagination.dto';
 import { PrismaService } from '../src/common/prisma.service';
 import { RedisService } from '../src/common/redis.service';
+import { SnowflakeService } from '../src/common/snowflake.service';
 import { RATE_LIMIT_POLICIES } from '../src/rate-limiter/rate-limit-policies';
 
 const OWNER = {
@@ -79,10 +81,11 @@ async function loggedInAgent(
   return agent;
 }
 
-describe('POST /channels/:channelId/messages (e2e)', () => {
+describe('the channel message routes (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let redis: RedisService;
+  let snowflakes: SnowflakeService;
 
   beforeAll(async () => {
     nock.disableNetConnect();
@@ -95,6 +98,7 @@ describe('POST /channels/:channelId/messages (e2e)', () => {
     app = moduleFixture.createNestApplication();
     prisma = moduleFixture.get(PrismaService);
     redis = moduleFixture.get(RedisService);
+    snowflakes = moduleFixture.get(SnowflakeService);
     await app.init();
   });
 
@@ -426,6 +430,218 @@ describe('POST /channels/:channelId/messages (e2e)', () => {
         .send({ content: 'hello' });
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe('GET /channels/:channelId/messages', () => {
+    /** `count` messages posted straight into the table, oldest first. */
+    async function seedHistory(
+      channelId: string,
+      count: number,
+    ): Promise<string[]> {
+      const author = await prisma.user.findUnique({
+        where: { githubId: String(MEMBER.githubId) },
+      });
+      if (author === null) throw new Error('No user for the member fixture');
+
+      const ids: string[] = [];
+      // Written directly rather than through the route: the send budget is
+      // five, and this needs far more than five messages. The ids still come
+      // from the real generator rather than being minted by hand, so they
+      // stay unique across two calls in the same millisecond and decode to an
+      // honest createdAt.
+      for (let index = 0; index < count; index += 1) {
+        const created = await prisma.message.create({
+          data: {
+            id: snowflakes.generate(),
+            channelId: BigInt(channelId),
+            authorId: author.id,
+            content: `message ${index}`,
+          },
+        });
+        ids.push(created.id.toString());
+      }
+
+      return ids;
+    }
+
+    function pageOf(body: unknown): {
+      messages: { id: string; content: string | null; isDeleted: boolean }[];
+      hasMore: boolean;
+    } {
+      return body as {
+        messages: { id: string; content: string | null; isDeleted: boolean }[];
+        hasMore: boolean;
+      };
+    }
+
+    it('returns the newest page, of the default size, with no cursor', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, DEFAULT_PAGE_SIZE + 10);
+
+      const response = await member.get(`/channels/${channelId}/messages`);
+
+      expect(response.status).toBe(200);
+      const page = pageOf(response.body);
+      expect(page.messages).toHaveLength(DEFAULT_PAGE_SIZE);
+      expect(page.hasMore).toBe(true);
+      // The newest ones, oldest-first within the page.
+      expect(page.messages[page.messages.length - 1]?.id).toBe(
+        ids[ids.length - 1],
+      );
+    });
+
+    it('pages backwards with ?before=, oldest → newest within the page', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 10);
+
+      const response = await member.get(
+        `/channels/${channelId}/messages?before=${ids[5]}&limit=3`,
+      );
+
+      expect(pageOf(response.body).messages.map((m) => m.id)).toEqual([
+        ids[2],
+        ids[3],
+        ids[4],
+      ]);
+    });
+
+    it('skips and duplicates nothing when a message arrives between two pages', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 6);
+
+      const first = pageOf(
+        (await member.get(`/channels/${channelId}/messages?limit=2`)).body,
+      );
+
+      // Actually inserted between the two calls — the situation offset paging
+      // gets wrong, and the only reason the cursor is a Snowflake.
+      await seedHistory(channelId, 1);
+
+      const second = pageOf(
+        (
+          await member.get(
+            `/channels/${channelId}/messages?before=${first.messages[0]?.id}&limit=2`,
+          )
+        ).body,
+      );
+
+      expect(first.messages.map((m) => m.id)).toEqual([ids[4], ids[5]]);
+      expect(second.messages.map((m) => m.id)).toEqual([ids[2], ids[3]]);
+    });
+
+    it('returns only messages newer than ?after=, in the same order', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 6);
+
+      const response = await member.get(
+        `/channels/${channelId}/messages?after=${ids[2]}`,
+      );
+
+      const page = pageOf(response.body);
+      expect(page.messages.map((m) => m.id)).toEqual([ids[3], ids[4], ids[5]]);
+      expect(page.hasMore).toBe(false);
+    });
+
+    it('reports hasMore true with one row left and false on the last page', async () => {
+      const { channelId, member } = await seed();
+      await seedHistory(channelId, 4);
+
+      const partial = await member.get(
+        `/channels/${channelId}/messages?limit=3`,
+      );
+      const whole = await member.get(`/channels/${channelId}/messages?limit=4`);
+
+      expect(pageOf(partial.body).hasMore).toBe(true);
+      expect(pageOf(whole.body).hasMore).toBe(false);
+    });
+
+    it('rejects both cursors together with 400, saying they are exclusive', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 3);
+
+      const response = await member.get(
+        `/channels/${channelId}/messages?before=${ids[2]}&after=${ids[0]}`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.text).toContain('mutually exclusive');
+    });
+
+    it('rejects a limit over the ceiling with 400', async () => {
+      const { channelId, member } = await seed();
+
+      const response = await member.get(
+        `/channels/${channelId}/messages?limit=101`,
+      );
+
+      expect(response.status).toBe(400);
+      expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
+    });
+
+    it('renders a soft-deleted message as a placeholder, text and all', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 3);
+      await prisma.message.update({
+        where: { id: BigInt(ids[1] ?? '0') },
+        data: { isDeleted: true, deletedAt: new Date() },
+      });
+
+      const response = await member.get(`/channels/${channelId}/messages`);
+
+      const page = pageOf(response.body);
+      // Included and counted, so page boundaries stay stable.
+      expect(page.messages).toHaveLength(3);
+      expect(page.messages[1]).toMatchObject({
+        id: ids[1],
+        content: null,
+        isDeleted: true,
+      });
+      // The stored text is still in the row here — #63 is what blanks it —
+      // so this asserts the response is what withholds it.
+      expect(response.text).not.toContain('message 1');
+    });
+
+    it('gives 404, not 403, to a caller without effective view', async () => {
+      const { channelId, member, owner } = await seed();
+      await seedHistory(channelId, 2);
+
+      await owner.put(`/channels/${channelId}/overrides/member/view`);
+      await resetBudget('strict-mutation');
+
+      const response = await member.get(`/channels/${channelId}/messages`);
+
+      // A revoked `view` hides the channel rather than admitting it is there:
+      // a 403 would confirm the existence of something the listing filters out.
+      expect(response.status).toBe(404);
+    });
+
+    it('gives 404 to a non-member of a private channel', async () => {
+      const { privateChannelId, member } = await seed();
+
+      const response = await member.get(
+        `/channels/${privateChannelId}/messages`,
+      );
+
+      expect(response.status).toBe(404);
+    });
+
+    it('serialises message ids as JSON strings inside the page', async () => {
+      const { channelId, member } = await seed();
+      const ids = await seedHistory(channelId, 2);
+
+      const response = await member.get(`/channels/${channelId}/messages`);
+
+      expect(response.text).toContain(`"id":"${ids[0]}"`);
+    });
+
+    it('returns an empty page for a channel with no messages', async () => {
+      const { channelId, member } = await seed();
+
+      const response = await member.get(`/channels/${channelId}/messages`);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ messages: [], hasMore: false });
     });
   });
 });
