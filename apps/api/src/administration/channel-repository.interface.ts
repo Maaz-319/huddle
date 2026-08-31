@@ -44,10 +44,10 @@ export abstract class ChannelRepository {
    * server is not a conflict.
    *
    * Creating a private channel deliberately seats *nobody*: no
-   * `ChannelMember` row is written here. Who is in a private channel is
-   * #53's route to decide, and an implicit creator row would be a grant this
-   * port could not later explain. The creator reaches the channel through
-   * their server role, and the owner always can (PRD section 5).
+   * `ChannelMember` row is written here. Who is in a private channel is for
+   * the member routes to decide, and an implicit creator row would be a grant
+   * this port could not later explain. The creator reaches the channel
+   * through their server role, and the owner always can (PRD section 5).
    */
   abstract create(input: CreateChannelInput): Promise<Channel>;
 
@@ -55,19 +55,17 @@ export abstract class ChannelRepository {
   abstract findById(id: bigint): Promise<Channel | null>;
 
   /**
-   * Every channel in a server, private ones included. Filtering by what the
-   * caller may see is the caller's job, not this port's — see
-   * `AdministrationService.listChannels`.
+   * Every channel in a server, private ones included and unfiltered. Deciding
+   * what a given caller may see is the caller's job, not this port's — see
+   * `AdministrationService.listChannels`, which resolves effective `view`
+   * over this result.
    */
   abstract findByServerId(serverId: bigint): Promise<Channel[]>;
 
   /**
    * Applies a partial update. Throws `NotFoundError` if the id doesn't exist.
    *
-   * No route calls this yet: it lands with the rename and visibility-toggle
-   * routes in #52. It is defined here so the port is the whole of the channel
-   * lifecycle rather than growing a method per ticket — the same reasoning
-   * `rate-limit-policies.ts` records for `ws-connect`.
+   * Called by `PATCH /channels/:channelId`.
    */
   abstract update(id: bigint, patch: UpdateChannelInput): Promise<Channel>;
 
@@ -75,8 +73,6 @@ export abstract class ChannelRepository {
    * Hard-deletes the channel. Throws `NotFoundError` if the id doesn't exist.
    * `Message`, `ChannelMember` and `ChannelOverride` rows cascade off this at
    * the schema level (data-model.md section 7) — no app-level cleanup here.
-   *
-   * Like `update`, no route calls this until #52.
    */
   abstract delete(id: bigint): Promise<void>;
 }

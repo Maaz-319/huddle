@@ -45,8 +45,8 @@ export abstract class ChannelOverrideRepository {
 
   /**
    * Every revocation in force across several channels, in one query. The bulk
-   * read #54's view-filtered listing needs; an empty input list makes no
-   * query at all.
+   * read the view-filtered channel listing needs; an empty input list makes
+   * no query at all.
    */
   abstract findByChannelIds(channelIds: bigint[]): Promise<ChannelOverride[]>;
 

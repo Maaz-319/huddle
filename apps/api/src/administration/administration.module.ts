@@ -27,7 +27,7 @@ import { ServerRepository } from './server-repository.interface';
  * Servers, membership, invites, and channels. `ServerRepository`/
  * `MembershipRepository` are the ports #36–#37 build server-level authority
  * on top of; `InviteRepository` is what #46–#48 build joining on top of;
- * `ChannelRepository` is what #49–#52 build channels on top of, with
+ * `ChannelRepository` is what the channel routes build on, with
  * `ChannelMemberRepository` and `ChannelOverrideRepository` holding the two
  * halves of per-channel permission data that `@RequireCapability` reads.
  *

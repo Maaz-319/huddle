@@ -3,7 +3,10 @@ import { Injectable } from '@nestjs/common';
 // than restated so the write-time no-op check and the read-time rule cannot
 // disagree about what a Member holds -- a plain function and a constant, so
 // this is not a dependency on the Auth module, only on its rules.
-import { DEFAULT_CAPABILITIES } from '../auth/resolve-capability';
+import {
+  DEFAULT_CAPABILITIES,
+  resolveCapability,
+} from '../auth/resolve-capability';
 import {
   ForbiddenError,
   NotFoundError,
@@ -417,21 +420,25 @@ export class AdministrationService {
   /**
    * The channels in a server that this caller may see.
    *
-   * Private channels the caller holds no `ChannelMember` row for are dropped:
-   * a private channel is *fully hidden* from non-members and must not appear
-   * in their list at all (administration-service.md section 3, PRD section 5).
-   * The owner is exempt — authority is a server-level fact a channel can
-   * never touch (PRD section 5), so an owner sees every channel in their own
-   * server without needing a row.
+   * "May see" is the caller's **effective `view` capability**, resolved by
+   * the same `resolveCapability` the request guard calls. Reimplementing the
+   * rule here would be a second copy of a permission rule, and the copy that
+   * drifts is the one that silently exposes a private channel.
    *
-   * What is deliberately *not* filtered here yet is a `view` capability
-   * revoked by a `ChannelOverride`. That lands in #54, which replaces this
-   * with a `resolveCapability(..., 'view')` pass over the same list and the
-   * same single bulk membership read. Until then a channel a role can see but
-   * not view still appears.
+   * A channel the caller cannot view is **absent** from the result, never
+   * present with a flag: administration-service.md section 3 says private
+   * channels are *fully hidden* and "do not appear in their channel list at
+   * all", and a flagged entry leaks both the name and the existence.
    *
-   * One `findChannelIdsForUser` call rather than one `isMember` per channel —
-   * that is the whole reason the bulk method exists.
+   * The owner is exempt and returns before any channel-scoped read —
+   * authority is a server-level fact a channel can never touch (PRD section
+   * 5).
+   *
+   * Four reads for the whole server, whatever its channel count: the two
+   * channel-scoped tables are read in bulk and the rule is then applied in
+   * memory. Calling the guard once per channel would be N+1 on the most-hit
+   * read in the app. `administration-repositories.integration-spec.ts`
+   * asserts the count does not grow with the number of channels.
    */
   async listChannels(serverId: bigint, callerId: bigint): Promise<Channel[]> {
     const channels = await this.channels.findByServerId(serverId);
@@ -451,19 +458,36 @@ export class AdministrationService {
 
     if (membership.role === 'owner') return channels;
 
-    const privateIds = channels
-      .filter((channel) => channel.isPrivate)
-      .map((channel) => channel.id);
+    const channelIds = channels.map((channel) => channel.id);
 
-    if (privateIds.length === 0) return channels;
+    const [memberOf, overrides] = await Promise.all([
+      this.channelMembers.findChannelIdsForUser(channelIds, callerId),
+      this.channelOverrides.findByChannelIds(channelIds),
+    ]);
 
-    const visible = await this.channelMembers.findChannelIdsForUser(
-      privateIds,
-      callerId,
-    );
+    // Grouped once rather than searched per channel, so the in-memory pass
+    // stays linear in the number of channels rather than quadratic.
+    const byChannel = new Map<bigint, ChannelOverride[]>();
+    for (const override of overrides) {
+      const existing = byChannel.get(override.channelId);
+      if (existing === undefined) {
+        byChannel.set(override.channelId, [override]);
+      } else {
+        existing.push(override);
+      }
+    }
 
     return channels.filter(
-      (channel) => !channel.isPrivate || visible.has(channel.id),
+      (channel) =>
+        resolveCapability(
+          {
+            role: membership.role,
+            isPrivate: channel.isPrivate,
+            isChannelMember: memberOf.has(channel.id),
+            overrides: byChannel.get(channel.id) ?? [],
+          },
+          'view',
+        ).allowed,
     );
   }
 

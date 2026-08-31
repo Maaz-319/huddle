@@ -493,28 +493,91 @@ describe('AdministrationService', () => {
       ).resolves.toEqual([]);
     });
 
-    it('makes one bulk membership read, not one per channel', async () => {
+    it('hides a public channel whose view a member has lost', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      // Absent, not flagged: a flagged entry leaks the name and the
+      // existence, which is the thing hiding is for.
+      expect(listed.map((channel) => channel.name)).toEqual(['general']);
+    });
+
+    it('takes it from that role only', async () => {
+      const serverId = await seedServer('moderator');
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const asModerator = await service.listChannels(serverId, OTHER_USER_ID);
+      const asOwner = await service.listChannels(serverId, OWNER_ID);
+
+      // The revocation names `member`. A blanket-deny bug passes the member
+      // case above on its own, so both other roles are asserted here.
+      expect(asModerator.map((channel) => channel.name)).toEqual(['staff']);
+      expect(asOwner.map((channel) => channel.name)).toEqual(['staff']);
+    });
+
+    it('leaves the owner untouched by an override naming their own channel', async () => {
+      const serverId = await seedServer('owner');
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      // Every role that *can* be overridden, revoked at once. An owner
+      // override is unrepresentable, which is the point.
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+      await channelOverrides.revoke(gated.id, 'moderator', 'view');
+
+      await expect(
+        service.listChannels(serverId, OWNER_ID),
+      ).resolves.toHaveLength(1);
+    });
+
+    it('reads both channel-scoped tables in bulk, never once per channel', async () => {
       const serverId = await seedServer('member');
       await channels.create({ serverId, name: 'a', isPrivate: true });
       await channels.create({ serverId, name: 'b', isPrivate: true });
-      await channels.create({ serverId, name: 'c', isPrivate: true });
-      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
-      const single = jest.spyOn(channelMembers, 'isMember');
+      await channels.create({ serverId, name: 'c', isPrivate: false });
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
+      const perChannelMember = jest.spyOn(channelMembers, 'isMember');
+      const perChannelOverride = jest.spyOn(
+        channelOverrides,
+        'findByChannelId',
+      );
 
       await service.listChannels(serverId, OTHER_USER_ID);
 
-      expect(bulk).toHaveBeenCalledTimes(1);
-      expect(single).not.toHaveBeenCalled();
+      expect(bulkMembers).toHaveBeenCalledTimes(1);
+      expect(bulkOverrides).toHaveBeenCalledTimes(1);
+      expect(perChannelMember).not.toHaveBeenCalled();
+      expect(perChannelOverride).not.toHaveBeenCalled();
     });
 
-    it('makes no membership read at all when the server has no private channels', async () => {
-      const serverId = await seedServer('member');
-      await channels.create({ serverId, name: 'general', isPrivate: false });
-      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+    it('makes no channel-scoped read at all for the owner', async () => {
+      const serverId = await seedServer('owner');
+      await channels.create({ serverId, name: 'a', isPrivate: true });
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
 
-      await service.listChannels(serverId, OTHER_USER_ID);
+      await service.listChannels(serverId, OWNER_ID);
 
-      expect(bulk).not.toHaveBeenCalled();
+      // The owner bypass is a rule, not an optimisation -- it returns before
+      // either table is consulted.
+      expect(bulkMembers).not.toHaveBeenCalled();
+      expect(bulkOverrides).not.toHaveBeenCalled();
     });
   });
 

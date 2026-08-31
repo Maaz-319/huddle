@@ -78,10 +78,10 @@ export class ChannelController {
   /**
    * The server's channels, as this caller may see them.
    *
-   * Private channels the caller is not in are dropped — see
-   * `AdministrationService.listChannels`, which also records what is *not*
-   * filtered yet: a `view` capability revoked by a `ChannelOverride` still
-   * leaves the channel in this list, and #54 is where that lands.
+   * Filtered by the caller's effective `view` capability — private channels
+   * they are not in, and channels an override has taken `view` from their
+   * role, are both absent rather than flagged. See
+   * `AdministrationService.listChannels`.
    *
    * Listing all three roles on `@RequireRole` is not redundant; it is what
    * buys the 403-vs-404 disambiguation, for the reason already written on

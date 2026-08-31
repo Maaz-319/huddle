@@ -37,7 +37,7 @@ import { User } from './user-repository.interface';
  *
  * This guard does no rule arithmetic. It loads, calls `resolveCapability`,
  * and turns the decision into an error — the rules live in that one function
- * so that #54's channel-list filter decides identically.
+ * so that the channel-list filter decides identically.
  *
  * **Several outcomes here are 404 where a first reading would expect 403**,
  * and they all render byte-identically to "no such channel":
@@ -47,10 +47,10 @@ import { User } from './user-repository.interface';
  * - a private channel the caller holds no `ChannelMember` row for — a private
  *   channel is *fully hidden* (administration-service.md section 3);
  * - **any refusal of `view` at all**, including one caused by an override.
- *   This last one goes beyond #51's literal step 6, deliberately: once #54
- *   filters a `view`-revoked channel out of the listing, a 403 on direct
- *   access would confirm the existence of a channel the caller can never see
- *   listed — a weaker version of exactly the leak the rule above prevents. A
+ *   This one is deliberate rather than obvious: the channel listing filters
+ *   a `view`-revoked channel out, so a 403 on direct access would confirm
+ *   the existence of a channel the caller can never see listed — a weaker
+ *   version of exactly the leak the rule above prevents. A
  *   capability the caller cannot use to see the channel should not be able to
  *   tell them it is there.
  *
