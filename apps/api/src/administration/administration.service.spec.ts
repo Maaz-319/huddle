@@ -1,5 +1,6 @@
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
 import { FakeChannelMemberRepository } from '../../test/fakes/fake-channel-member-repository';
+import { FakeChannelOverrideRepository } from '../../test/fakes/fake-channel-override-repository';
 import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository';
 import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
@@ -22,6 +23,7 @@ describe('AdministrationService', () => {
   let invites: FakeInviteRepository;
   let channels: FakeChannelRepository;
   let channelMembers: FakeChannelMemberRepository;
+  let channelOverrides: FakeChannelOverrideRepository;
   let service: AdministrationService;
 
   beforeEach(() => {
@@ -31,12 +33,14 @@ describe('AdministrationService', () => {
     invites = new FakeInviteRepository(store);
     channels = new FakeChannelRepository(store);
     channelMembers = new FakeChannelMemberRepository(store);
+    channelOverrides = new FakeChannelOverrideRepository(store);
     service = new AdministrationService(
       servers,
       memberships,
       invites,
       channels,
       channelMembers,
+      channelOverrides,
     );
   });
 
@@ -790,6 +794,128 @@ describe('AdministrationService', () => {
       await expect(
         service.addChannelMember(999000000000000001n, OTHER_USER_ID),
       ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+  describe('channel overrides', () => {
+    async function seedChannel(): Promise<bigint> {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      return channel.id;
+    }
+
+    it('records a revocation', async () => {
+      const channelId = await seedChannel();
+
+      await service.revokeCapability(channelId, 'member', 'post');
+
+      await expect(service.listChannelOverrides(channelId)).resolves.toEqual([
+        { channelId, role: 'member', capability: 'post' },
+      ]);
+    });
+
+    it('revoking twice leaves one row', async () => {
+      const channelId = await seedChannel();
+
+      await service.revokeCapability(channelId, 'moderator', 'delete_others');
+      await service.revokeCapability(channelId, 'moderator', 'delete_others');
+
+      await expect(
+        service.listChannelOverrides(channelId),
+      ).resolves.toHaveLength(1);
+    });
+
+    it('restores by removing the row', async () => {
+      const channelId = await seedChannel();
+      await service.revokeCapability(channelId, 'member', 'post');
+
+      await service.restoreCapability(channelId, 'member', 'post');
+
+      await expect(service.listChannelOverrides(channelId)).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('restoring something never revoked is a no-op', async () => {
+      const channelId = await seedChannel();
+
+      await expect(
+        service.restoreCapability(channelId, 'member', 'view'),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['moderator', 'view'],
+      ['moderator', 'post'],
+      ['moderator', 'delete_others'],
+      ['moderator', 'manage_settings'],
+      ['member', 'view'],
+      ['member', 'post'],
+    ] as const)('accepts %s + %s', async (role, capability) => {
+      const channelId = await seedChannel();
+
+      await expect(
+        service.revokeCapability(channelId, role, capability),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each(['delete_others', 'manage_settings'] as const)(
+      'refuses member + %s as a no-op tighten',
+      async (capability) => {
+        const channelId = await seedChannel();
+
+        // A Member holds neither server-wide, so the row would revoke
+        // something that was never held.
+        await expect(
+          service.revokeCapability(channelId, 'member', capability),
+        ).rejects.toBeInstanceOf(ValidationError);
+
+        await expect(service.listChannelOverrides(channelId)).resolves.toEqual(
+          [],
+        );
+      },
+    );
+
+    it('names the reason in the refusal, not just "invalid"', async () => {
+      const channelId = await seedChannel();
+
+      // A client sending this has a specific misunderstanding, and only the
+      // reason fixes it.
+      await expect(
+        service.revokeCapability(channelId, 'member', 'manage_settings'),
+      ).rejects.toThrow(
+        'A member does not hold manage_settings server-wide, so there is nothing to revoke',
+      );
+    });
+
+    it('lets a no-op pair be restored without complaint', async () => {
+      const channelId = await seedChannel();
+
+      // The write is refused, so the row cannot exist; refusing the delete
+      // too would fail a cleanup call for a reason the caller cannot act on.
+      await expect(
+        service.restoreCapability(channelId, 'member', 'manage_settings'),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['listChannelOverrides'],
+      ['revokeCapability'],
+      ['restoreCapability'],
+    ])('rejects a channel id nobody holds from %s', async (method) => {
+      const unknown = 999000000000000001n;
+      const call =
+        method === 'listChannelOverrides'
+          ? service.listChannelOverrides(unknown)
+          : method === 'revokeCapability'
+            ? service.revokeCapability(unknown, 'member', 'post')
+            : service.restoreCapability(unknown, 'member', 'post');
+
+      await expect(call).rejects.toBeInstanceOf(NotFoundError);
     });
   });
 });

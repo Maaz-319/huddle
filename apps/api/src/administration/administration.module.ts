@@ -15,6 +15,7 @@ import { ChannelDetailController } from './channel-detail.controller';
 import { ChannelMemberController } from './channel-member.controller';
 import { ChannelController } from './channel.controller';
 import { ChannelMemberRepository } from './channel-member-repository.interface';
+import { ChannelOverrideController } from './channel-override.controller';
 import { ChannelOverrideRepository } from './channel-override-repository.interface';
 import { ChannelRepository } from './channel-repository.interface';
 import { InviteController } from './invite.controller';
@@ -48,6 +49,7 @@ import { ServerRepository } from './server-repository.interface';
     ChannelController,
     ChannelDetailController,
     ChannelMemberController,
+    ChannelOverrideController,
   ],
   providers: [
     { provide: ServerRepository, useClass: PrismaServerRepository },

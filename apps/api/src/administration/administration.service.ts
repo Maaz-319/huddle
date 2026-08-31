@@ -1,4 +1,9 @@
 import { Injectable } from '@nestjs/common';
+// The same table `resolveCapability` reads at request time. Imported rather
+// than restated so the write-time no-op check and the read-time rule cannot
+// disagree about what a Member holds -- a plain function and a constant, so
+// this is not a dependency on the Auth module, only on its rules.
+import { DEFAULT_CAPABILITIES } from '../auth/resolve-capability';
 import {
   ForbiddenError,
   NotFoundError,
@@ -8,6 +13,12 @@ import {
   ChannelMember,
   ChannelMemberRepository,
 } from './channel-member-repository.interface';
+import {
+  Capability,
+  ChannelOverride,
+  ChannelOverrideRepository,
+  OverrideRole,
+} from './channel-override-repository.interface';
 import {
   Channel,
   ChannelRepository,
@@ -43,6 +54,7 @@ export class AdministrationService {
     private readonly invites: InviteRepository,
     private readonly channels: ChannelRepository,
     private readonly channelMembers: ChannelMemberRepository,
+    private readonly channelOverrides: ChannelOverrideRepository,
   ) {}
 
   /**
@@ -566,6 +578,78 @@ export class AdministrationService {
    */
   async removeChannelMember(channelId: bigint, userId: bigint): Promise<void> {
     await this.channelMembers.remove(channelId, userId);
+  }
+
+  /**
+   * Every revocation in force on a channel.
+   *
+   * Behind `manage_settings` like the two mutations: the list of what has
+   * been tightened is part of the channel's settings, not part of viewing it.
+   */
+  async listChannelOverrides(channelId: bigint): Promise<ChannelOverride[]> {
+    await this.getChannel(channelId);
+
+    return this.channelOverrides.findByChannelId(channelId);
+  }
+
+  /**
+   * Revokes a capability from a role in one channel. Authorization —
+   * `manage_settings` on this channel — already happened in
+   * `RequireCapabilityGuard`, so an Owner always may, and a Moderator may
+   * unless `manage_settings` has been revoked for `moderator` here.
+   *
+   * Idempotent: revoking twice leaves the same single row.
+   *
+   * `'owner'` never reaches this method — `ChannelOverrideParams` rejects it
+   * at the edge and `OverrideRole` excludes it in the type system. What is
+   * left to reject is the **no-op tighten**: a Member does not hold
+   * `delete_others` or `manage_settings` server-wide anywhere, so a row
+   * naming that pair would revoke something that was never held. The message
+   * names the reason rather than saying "invalid", because a client sending
+   * it has a specific misunderstanding and only the reason fixes it.
+   */
+  async revokeCapability(
+    channelId: bigint,
+    role: OverrideRole,
+    capability: Capability,
+  ): Promise<void> {
+    await this.getChannel(channelId);
+
+    if (
+      role === 'member' &&
+      !DEFAULT_CAPABILITIES.member.includes(capability)
+    ) {
+      throw new ValidationError(
+        `A member does not hold ${capability} server-wide, so there is nothing to revoke`,
+        { channelId: channelId.toString(), role, capability },
+      );
+    }
+
+    await this.channelOverrides.revoke(channelId, role, capability);
+  }
+
+  /**
+   * Removes a revocation, handing the role back to its server-wide default.
+   * Same authorization note as `revokeCapability`.
+   *
+   * **This is not a grant.** It cannot raise a role above its server-wide
+   * default, because all it does is delete a row that was subtracting from
+   * that default. Idempotent: restoring something never revoked is a no-op,
+   * not a 404.
+   *
+   * The no-op-tighten check is deliberately not repeated here. There is
+   * nothing to protect against — deleting a row that cannot exist is already
+   * a no-op, and refusing it would make a cleanup call fail for a reason the
+   * caller cannot act on.
+   */
+  async restoreCapability(
+    channelId: bigint,
+    role: OverrideRole,
+    capability: Capability,
+  ): Promise<void> {
+    await this.getChannel(channelId);
+
+    await this.channelOverrides.restore(channelId, role, capability);
   }
 
   /**
