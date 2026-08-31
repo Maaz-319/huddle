@@ -61,6 +61,52 @@ Out of scope (this doc): permission *enforcement* (checking a resolved role/capa
 - **Defaults:** Moderators have full delete-others'-messages and manage-channel-settings rights on every channel, unless the owner explicitly tightens (revokes) that right on a specific channel. Members follow the server-wide Member defaults (§5 of the PRD) unless tightened per channel.
 - **Private-channel membership:** add/remove is part of manage-channel-settings — anyone (owner or mod) holding that capability on a given private channel can add/remove its members. A user must already be a server member (via the server invite) before they can be added to any channel, private or not.
 
+### Default capabilities by role
+
+The server-wide starting point every channel tightens *down* from. Enforced by
+`resolveCapability` in `apps/api/src/auth/resolve-capability.ts`, whose
+`DEFAULT_CAPABILITIES` constant is this table.
+
+| Capability | Owner | Moderator | Member |
+|---|---|---|---|
+| **View** | ✅ | ✅ | ✅ |
+| **Post** | ✅ | ✅ | ✅ |
+| **Delete-others'-messages** | ✅ | ✅ | ❌ |
+| **Manage-channel-settings** | ✅ | ✅ | ❌ |
+
+A Member never holds delete-others or manage-settings anywhere in the server, so
+there is nothing for a channel override to take away — an override naming that
+pair is inert rather than wrong.
+
+### The Owner is never overridable, and never hidden
+
+The Owner's column above is not merely "all four by default": it is **not
+overridable at all**. Authority is defined at the server level and can never be
+overridden by a channel (PRD §5), so `ChannelOverride.role` excludes `owner` at
+the type level in both `schema.prisma` and the port — an owner override is
+unrepresentable, not merely rejected.
+
+The same rule applies to private channels: **an Owner sees and manages every
+channel in their own server without a `ChannelMember` row.** `resolveCapability`
+returns for an owner before either the membership or the override table is
+consulted. A channel cannot lock its server's owner out of it.
+
+### Hidden, not forbidden: `view` refusals are 404
+
+A private channel is *fully hidden* from non-members (§3), so refusing a caller
+`view` must not tell them the channel exists. `RequireCapabilityGuard` therefore
+renders **every** `view` refusal as a `404` whose body is identical to the one
+for a channel id that does not exist — whether the cause is a missing channel, a
+non-member of the server, a private channel the caller is not in, or an override
+that revoked `view`.
+
+The last of those goes beyond a literal reading of the resolution order, which
+would make an override-driven refusal a 403. It is deliberate: once the channel
+listing is filtered by effective view capability (#54), a 403 on direct access
+would confirm the existence of a channel the caller can never see listed. Refusals
+of the other three capabilities keep their `403` — a caller asking to post or to
+manage settings can already see the channel, so there is nothing left to hide.
+
 ---
 
 ## 5. Invites
