@@ -30,7 +30,7 @@ class ErrorProbeController {
 
   @Get('paginated')
   paginated(@Query() query: CursorPaginationDto) {
-    return { limit: query.limit, cursor: query.cursor };
+    return { limit: query.limit, before: query.before };
   }
 }
 
@@ -115,12 +115,12 @@ describe('Error responses (e2e)', () => {
 
   it('applies the pagination defaults on a valid request', async () => {
     const response = await request(app.getHttpServer()).get(
-      '/probe/paginated?cursor=175928847299117063',
+      '/probe/paginated?before=175928847299117063',
     );
 
     expect(response.status).toBe(200);
     // The cursor comes back as a string because bigints serialise that way.
-    expect(response.body).toEqual({ limit: 50, cursor: '175928847299117063' });
+    expect(response.body).toEqual({ limit: 50, before: '175928847299117063' });
   });
 
   it('reshapes an unmatched route into the same envelope', async () => {
