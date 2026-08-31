@@ -1,9 +1,24 @@
 name: CI
 
+# Documentation-only changes skip this job entirely. Nothing below reads a
+# Markdown file -- lint, typecheck, prisma validate and the unit suite all
+# operate on TypeScript and the schema -- so a docs edit spends several
+# minutes of CI to re-prove something it cannot have broken.
+#
+# `paths-ignore` skips the workflow rather than passing it, so the run does
+# not appear at all on a docs-only PR. That is fine today because `main` has
+# no branch protection. If a required status check is ever added for this
+# job, a skipped run never reports and would block such a PR forever -- at
+# that point this needs to become a job that runs and exits early, not a
+# workflow that does not start.
 on:
   pull_request:
+    paths-ignore:
+      - '**.md'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
 
 jobs:
   build-and-test:

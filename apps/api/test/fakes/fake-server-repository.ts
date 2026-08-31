@@ -99,10 +99,15 @@ export class FakeServerRepository extends ServerRepository {
   }
 
   delete(id: bigint): Promise<void> {
-    // Invite cascades off Server at the schema level (data-model.md section
-    // 7), so the fake drops it here too -- otherwise a deleted server's code
-    // would still resolve through findByCode.
+    // Invite and Channel both cascade off Server at the schema level
+    // (data-model.md section 7), so the fake drops them here too -- otherwise
+    // a deleted server's code would still resolve through findByCode, and its
+    // channels would still be listed.
     this.store.invites.delete(id);
+
+    for (const [channelId, channel] of this.store.channels) {
+      if (channel.serverId === id) this.store.channels.delete(channelId);
+    }
 
     if (!this.store.servers.delete(id)) {
       return Promise.reject(

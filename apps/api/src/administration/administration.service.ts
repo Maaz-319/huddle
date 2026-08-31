@@ -4,6 +4,12 @@ import {
   NotFoundError,
   ValidationError,
 } from '../common/errors';
+import { ChannelMemberRepository } from './channel-member-repository.interface';
+import {
+  Channel,
+  ChannelRepository,
+  CreateChannelInput,
+} from './channel-repository.interface';
 import { Invite, InviteRepository } from './invite-repository.interface';
 import {
   Membership,
@@ -31,6 +37,8 @@ export class AdministrationService {
     private readonly servers: ServerRepository,
     private readonly memberships: MembershipRepository,
     private readonly invites: InviteRepository,
+    private readonly channels: ChannelRepository,
+    private readonly channelMembers: ChannelMemberRepository,
   ) {}
 
   /**
@@ -343,5 +351,94 @@ export class AdministrationService {
     }
 
     await this.memberships.transferOwnership(serverId, fromUserId, toUserId);
+  }
+
+  /**
+   * Creates a channel in a server. Authorization — whether this caller's role
+   * is one the server's `channelCreationPolicy` admits — already happened in
+   * `RequireChannelCreationGuard`.
+   *
+   * Throws `ConflictError` if the server already holds a channel of that
+   * name. The uniqueness is per server, so the same name in a different
+   * server is fine.
+   */
+  async createChannel(input: CreateChannelInput): Promise<Channel> {
+    return this.channels.create(input);
+  }
+
+  /**
+   * The channels in a server that this caller may see.
+   *
+   * Private channels the caller holds no `ChannelMember` row for are dropped:
+   * a private channel is *fully hidden* from non-members and must not appear
+   * in their list at all (administration-service.md section 3, PRD section 5).
+   * The owner is exempt — authority is a server-level fact a channel can
+   * never touch (PRD section 5), so an owner sees every channel in their own
+   * server without needing a row.
+   *
+   * What is deliberately *not* filtered here yet is a `view` capability
+   * revoked by a `ChannelOverride`. That lands in #54, which replaces this
+   * with a `resolveCapability(..., 'view')` pass over the same list and the
+   * same single bulk membership read. Until then a channel a role can see but
+   * not view still appears.
+   *
+   * One `findChannelIdsForUser` call rather than one `isMember` per channel —
+   * that is the whole reason the bulk method exists.
+   */
+  async listChannels(serverId: bigint, callerId: bigint): Promise<Channel[]> {
+    const channels = await this.channels.findByServerId(serverId);
+
+    const membership = await this.memberships.findByServerAndUser(
+      serverId,
+      callerId,
+    );
+
+    // RequireRoleGuard has already rejected a non-member, so a null here
+    // would mean this method was reached without it -- a wiring bug.
+    if (membership === null) {
+      throw new ForbiddenError('Not a member of this server', {
+        serverId: serverId.toString(),
+      });
+    }
+
+    if (membership.role === 'owner') return channels;
+
+    const privateIds = channels
+      .filter((channel) => channel.isPrivate)
+      .map((channel) => channel.id);
+
+    if (privateIds.length === 0) return channels;
+
+    const visible = await this.channelMembers.findChannelIdsForUser(
+      privateIds,
+      callerId,
+    );
+
+    return channels.filter(
+      (channel) => !channel.isPrivate || visible.has(channel.id),
+    );
+  }
+
+  /**
+   * One channel's details.
+   *
+   * Deliberately does no authorization of its own: `RequireCapabilityGuard`
+   * has already resolved the caller's effective `view` capability, including
+   * the hidden-versus-forbidden distinction, which needs the channel row this
+   * method would otherwise have to load twice. A null here would mean the
+   * route was reached without the guard -- a wiring bug, not a 404 case, but
+   * it is answered as a 404 anyway so a misconfiguration can never leak more
+   * than the guard would have.
+   */
+  async getChannel(channelId: bigint): Promise<Channel> {
+    const channel = await this.channels.findById(channelId);
+
+    if (channel === null) {
+      throw new NotFoundError('Channel not found', {
+        channelId: channelId.toString(),
+      });
+    }
+
+    return channel;
   }
 }

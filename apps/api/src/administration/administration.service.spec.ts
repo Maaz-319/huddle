@@ -1,4 +1,6 @@
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
+import { FakeChannelMemberRepository } from '../../test/fakes/fake-channel-member-repository';
+import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository';
 import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
@@ -13,6 +15,8 @@ describe('AdministrationService', () => {
   let servers: FakeServerRepository;
   let memberships: FakeMembershipRepository;
   let invites: FakeInviteRepository;
+  let channels: FakeChannelRepository;
+  let channelMembers: FakeChannelMemberRepository;
   let service: AdministrationService;
 
   beforeEach(() => {
@@ -20,7 +24,15 @@ describe('AdministrationService', () => {
     servers = new FakeServerRepository(store);
     memberships = new FakeMembershipRepository(store);
     invites = new FakeInviteRepository(store);
-    service = new AdministrationService(servers, memberships, invites);
+    channels = new FakeChannelRepository(store);
+    channelMembers = new FakeChannelMemberRepository(store);
+    service = new AdministrationService(
+      servers,
+      memberships,
+      invites,
+      channels,
+      channelMembers,
+    );
   });
 
   describe('createServer', () => {
@@ -374,6 +386,148 @@ describe('AdministrationService', () => {
       await expect(
         service.deleteServer(999000000000000001n),
       ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('listChannels', () => {
+    /** A server with the caller seated in the given role. */
+    async function seedServer(role: Role): Promise<bigint> {
+      const { server } = await servers.createWithOwner(
+        {
+          name: 'Huddle HQ',
+          iconUrl: null,
+          channelCreationPolicy: 'everyone',
+          memberInviteToggle: true,
+        },
+        OWNER_ID,
+      );
+
+      if (role !== 'owner') {
+        await memberships.create({
+          serverId: server.id,
+          userId: OTHER_USER_ID,
+          role,
+        });
+      }
+
+      return server.id;
+    }
+
+    it('returns every public channel to an ordinary member', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      await channels.create({ serverId, name: 'random', isPrivate: false });
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      expect(listed.map((channel) => channel.name).sort()).toEqual([
+        'general',
+        'random',
+      ]);
+    });
+
+    it('hides a private channel from a member who is not in it', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      await channels.create({ serverId, name: 'mods', isPrivate: true });
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      // Fully hidden, not merely unreadable -- administration-service.md
+      // section 3. Its existence must not leak through the listing.
+      expect(listed.map((channel) => channel.name)).toEqual(['general']);
+    });
+
+    it('shows a private channel to a member who is in it', async () => {
+      const serverId = await seedServer('member');
+      const priv = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channelMembers.add(priv.id, OTHER_USER_ID);
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      expect(listed.map((channel) => channel.name)).toEqual(['mods']);
+    });
+
+    it('hides a private channel from a moderator who is not in it', async () => {
+      const serverId = await seedServer('moderator');
+      await channels.create({ serverId, name: 'secret', isPrivate: true });
+
+      const listed = await service.listChannels(serverId, OTHER_USER_ID);
+
+      // A moderator is not the owner: the owner bypass is the owner's alone.
+      expect(listed).toEqual([]);
+    });
+
+    it('shows the owner every private channel without a ChannelMember row', async () => {
+      const serverId = await seedServer('owner');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      await channels.create({ serverId, name: 'mods', isPrivate: true });
+
+      const listed = await service.listChannels(serverId, OWNER_ID);
+
+      // Authority is a server-level fact a channel can never touch (PRD
+      // section 5) -- a channel cannot hide itself from its server's owner.
+      expect(listed.map((channel) => channel.name).sort()).toEqual([
+        'general',
+        'mods',
+      ]);
+      await expect(
+        channelMembers.findByChannelId(listed[1].id),
+      ).resolves.toEqual([]);
+    });
+
+    it('makes one bulk membership read, not one per channel', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'a', isPrivate: true });
+      await channels.create({ serverId, name: 'b', isPrivate: true });
+      await channels.create({ serverId, name: 'c', isPrivate: true });
+      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const single = jest.spyOn(channelMembers, 'isMember');
+
+      await service.listChannels(serverId, OTHER_USER_ID);
+
+      expect(bulk).toHaveBeenCalledTimes(1);
+      expect(single).not.toHaveBeenCalled();
+    });
+
+    it('makes no membership read at all when the server has no private channels', async () => {
+      const serverId = await seedServer('member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const bulk = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+
+      await service.listChannels(serverId, OTHER_USER_ID);
+
+      expect(bulk).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createChannel', () => {
+    it('creates a channel without seating anyone in it', async () => {
+      const { server } = await servers.createWithOwner(
+        {
+          name: 'Huddle HQ',
+          iconUrl: null,
+          channelCreationPolicy: 'everyone',
+          memberInviteToggle: true,
+        },
+        OWNER_ID,
+      );
+
+      const channel = await service.createChannel({
+        serverId: server.id,
+        name: 'mods',
+        isPrivate: true,
+      });
+
+      // The creator gets no ChannelMember row -- they reach the channel
+      // through their server role, and #52 owns membership management.
+      await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
+        [],
+      );
     });
   });
 });
