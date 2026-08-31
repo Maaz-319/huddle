@@ -4,7 +4,10 @@ import {
   NotFoundError,
   ValidationError,
 } from '../common/errors';
-import { ChannelMemberRepository } from './channel-member-repository.interface';
+import {
+  ChannelMember,
+  ChannelMemberRepository,
+} from './channel-member-repository.interface';
 import {
   Channel,
   ChannelRepository,
@@ -488,6 +491,81 @@ export class AdministrationService {
    */
   async deleteChannel(channelId: bigint): Promise<void> {
     await this.channels.delete(channelId);
+  }
+
+  /**
+   * Everyone seated in a private channel.
+   *
+   * Behind `manage_settings` rather than `view`: administration-service.md
+   * section 4 puts add/remove inside the manage-settings bundle, and the list
+   * belongs with the thing that edits it.
+   *
+   * A **public** channel returns an empty array rather than a 400. Only the
+   * *write* is rejected there, because only the write would store a row
+   * nothing ever reads; reading an empty set is not an error, and a client
+   * rendering a member panel wants an empty list rather than an exception.
+   */
+  async listChannelMembers(channelId: bigint): Promise<ChannelMember[]> {
+    return this.channelMembers.findByChannelId(channelId);
+  }
+
+  /**
+   * Seats a user in a private channel. Authorization — `manage_settings` on
+   * this channel — already happened in `RequireCapabilityGuard`.
+   *
+   * Idempotent: re-adding someone already seated returns their existing row,
+   * `addedAt` untouched, and leaves exactly one row behind.
+   *
+   * Two rejections, both `ValidationError`:
+   *
+   * - **The target is not a member of the channel's server.** A user must
+   *   already be a server member, via the server invite, before they can be
+   *   added to any channel (administration-service.md section 4). Channel
+   *   membership is a narrowing of server membership, never a way into a
+   *   server.
+   * - **The channel is public.** `ChannelMember` rows exist for private
+   *   channels only (data-model.md section 4.5); on a public channel nothing
+   *   would ever read the row, so storing one would be data that quietly
+   *   means nothing.
+   */
+  async addChannelMember(
+    channelId: bigint,
+    userId: bigint,
+  ): Promise<ChannelMember> {
+    const channel = await this.getChannel(channelId);
+
+    if (!channel.isPrivate) {
+      throw new ValidationError(
+        'A public channel has no member list — everyone in the server can see it',
+        { channelId: channelId.toString() },
+      );
+    }
+
+    const membership = await this.memberships.findByServerAndUser(
+      channel.serverId,
+      userId,
+    );
+
+    if (membership === null) {
+      throw new ValidationError(
+        "That user is not a member of this channel's server, so they cannot be added to a channel in it",
+        { channelId: channelId.toString(), userId: userId.toString() },
+      );
+    }
+
+    return this.channelMembers.add(channelId, userId);
+  }
+
+  /**
+   * Removes a user from a private channel. Same authorization note as
+   * `addChannelMember`.
+   *
+   * Idempotent, and deliberately does not check the channel is private:
+   * removing a row is safe wherever the row happens to be, and refusing here
+   * would leave the rows a private-to-public flip left behind unreachable.
+   */
+  async removeChannelMember(channelId: bigint, userId: bigint): Promise<void> {
+    await this.channelMembers.remove(channelId, userId);
   }
 
   /**

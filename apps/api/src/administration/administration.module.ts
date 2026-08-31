@@ -12,6 +12,7 @@ import { PrismaServerRepository } from './adapters/prisma-server-repository.adap
 import { AdministrationController } from './administration.controller';
 import { AdministrationService } from './administration.service';
 import { ChannelDetailController } from './channel-detail.controller';
+import { ChannelMemberController } from './channel-member.controller';
 import { ChannelController } from './channel.controller';
 import { ChannelMemberRepository } from './channel-member-repository.interface';
 import { ChannelOverrideRepository } from './channel-override-repository.interface';
@@ -46,6 +47,7 @@ import { ServerRepository } from './server-repository.interface';
     InviteController,
     ChannelController,
     ChannelDetailController,
+    ChannelMemberController,
   ],
   providers: [
     { provide: ServerRepository, useClass: PrismaServerRepository },

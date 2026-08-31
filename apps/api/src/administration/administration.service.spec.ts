@@ -4,7 +4,12 @@ import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository'
 import { FakeInviteRepository } from '../../test/fakes/fake-invite-repository';
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
-import { ConflictError, ForbiddenError, NotFoundError } from '../common/errors';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../common/errors';
 import { AdministrationService } from './administration.service';
 import { Role } from './membership-repository.interface';
 
@@ -677,6 +682,113 @@ describe('AdministrationService', () => {
     it('rejects an id nobody holds', async () => {
       await expect(
         service.deleteChannel(999000000000000001n),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+  describe('channel members', () => {
+    /** A private channel in a server the caller is a plain member of. */
+    async function seedPrivateChannel(): Promise<{
+      serverId: bigint;
+      channelId: bigint;
+    }> {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+
+      return { serverId, channelId: channel.id };
+    }
+
+    it('seats a server member', async () => {
+      const { channelId } = await seedPrivateChannel();
+
+      const member = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      expect(member).toMatchObject({ channelId, userId: OTHER_USER_ID });
+      await expect(
+        channelMembers.isMember(channelId, OTHER_USER_ID),
+      ).resolves.toBe(true);
+    });
+
+    it('re-adding returns the original row and leaves exactly one', async () => {
+      const { channelId } = await seedPrivateChannel();
+      const first = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      const second = await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      // Sliding addedAt forward would quietly rewrite when they joined.
+      expect(second.addedAt).toEqual(first.addedAt);
+      await expect(service.listChannelMembers(channelId)).resolves.toHaveLength(
+        1,
+      );
+    });
+
+    it("refuses a user who is not in the channel's server", async () => {
+      const { channelId } = await seedPrivateChannel();
+      const outsider = 300000000000000009n;
+
+      await expect(
+        service.addChannelMember(channelId, outsider),
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      // Channel membership narrows server membership; it is never a way in.
+      await expect(channelMembers.isMember(channelId, outsider)).resolves.toBe(
+        false,
+      );
+    });
+
+    it('refuses an add to a public channel', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await expect(
+        service.addChannelMember(channel.id, OTHER_USER_ID),
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('lists an empty member list for a public channel rather than throwing', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+
+      await expect(service.listChannelMembers(channel.id)).resolves.toEqual([]);
+    });
+
+    it('removes a seated member', async () => {
+      const { channelId } = await seedPrivateChannel();
+      await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      await service.removeChannelMember(channelId, OTHER_USER_ID);
+
+      await expect(
+        channelMembers.isMember(channelId, OTHER_USER_ID),
+      ).resolves.toBe(false);
+    });
+
+    it('removing someone who is not there is a no-op, not a throw', async () => {
+      const { channelId } = await seedPrivateChannel();
+
+      await expect(
+        service.removeChannelMember(channelId, OTHER_USER_ID),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses an add to a channel id nobody holds', async () => {
+      await expect(
+        service.addChannelMember(999000000000000001n, OTHER_USER_ID),
       ).rejects.toBeInstanceOf(NotFoundError);
     });
   });
