@@ -5,6 +5,7 @@ import { PrismaServerRepository } from '../src/administration/adapters/prisma-se
 import { ChannelRepository } from '../src/administration/channel-repository.interface';
 import { ServerRepository } from '../src/administration/server-repository.interface';
 import { PrismaMessageRepository } from '../src/chat/adapters/prisma-message-repository.adapter';
+import { ChatService } from '../src/chat/chat.service';
 import { MessageRepository } from '../src/chat/message-repository.interface';
 import { NotFoundError } from '../src/common/errors';
 import { PrismaService } from '../src/common/prisma.service';
@@ -148,6 +149,115 @@ describe('the chat Prisma adapters', () => {
       await channels.delete(channel.id);
 
       await expect(messages.findById(message.id)).resolves.toBeNull();
+    });
+  });
+
+  /**
+   * One page must cost a fixed number of reads whatever the page size — the
+   * `@@index([channelId, id])` index does the paging, and a per-message
+   * follow-up read would not show up in the contract suite at all, only in
+   * the latency of a real channel.
+   *
+   * `jest.spyOn` on the adapter instance rather than a counting wrapper: it
+   * counts the same thing with nothing new to keep in step with the port.
+   * Same idiom as the channel listing's own bounded-reads suite in
+   * `administration-repositories.integration-spec.ts`.
+   */
+  describe('one page of history is a bounded number of reads', () => {
+    let service: ChatService;
+    let channelId: bigint;
+
+    beforeEach(async () => {
+      await truncateAll(prisma);
+      await prisma.user.create({ data: userFixture(MESSAGE_AUTHOR_ID) });
+      const { server } = await servers.createWithOwner(
+        {
+          name: 'Huddle HQ',
+          iconUrl: null,
+          channelCreationPolicy: 'everyone',
+          memberInviteToggle: true,
+        },
+        MESSAGE_AUTHOR_ID,
+      );
+      const channel = await channels.create({
+        serverId: server.id,
+        name: 'general',
+        isPrivate: false,
+      });
+      channelId = channel.id;
+      service = new ChatService(messages);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    async function seedMessages(count: number): Promise<void> {
+      for (let index = 0; index < count; index += 1) {
+        await messages.create({
+          channelId,
+          authorId: MESSAGE_AUTHOR_ID,
+          content: `message ${index}`,
+        });
+      }
+    }
+
+    it.each([[5], [50]])('reads once for a page of %i', async (limit) => {
+      await seedMessages(limit * 2);
+      const before = jest.spyOn(messages, 'findPageBefore');
+      const byId = jest.spyOn(messages, 'findById');
+
+      const page = await service.getHistory(channelId, {}, limit);
+
+      expect(page.messages).toHaveLength(limit);
+      expect(before).toHaveBeenCalledTimes(1);
+      // The N+1 this rules out: a per-message read to fill in the response.
+      expect(byId).not.toHaveBeenCalled();
+    });
+
+    it('reads once for a forwards page too', async () => {
+      await seedMessages(60);
+      const first = await service.getHistory(channelId, {}, 50);
+      const oldest = first.messages[0];
+      const after = jest.spyOn(messages, 'findPageAfter');
+      const byId = jest.spyOn(messages, 'findById');
+
+      await service.getHistory(channelId, { after: oldest?.id }, 50);
+
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(byId).not.toHaveBeenCalled();
+    });
+
+    it('asks for exactly one row beyond the page, never a count', async () => {
+      // hasMore must not cost a second scan of the same index.
+      await seedMessages(60);
+      const before = jest.spyOn(messages, 'findPageBefore');
+
+      await service.getHistory(channelId, {}, 50);
+
+      expect(before).toHaveBeenCalledWith(channelId, null, 51);
+    });
+
+    it('keeps a soft-deleted message in the page, and counts it', async () => {
+      // A Map-backed fake would agree either way; this proves the real query
+      // has no `isDeleted: false` filter quietly added to it.
+      await seedMessages(4);
+      const page = await service.getHistory(channelId, {}, 50);
+      const victim = page.messages[1];
+      if (victim === undefined) throw new Error('No message to delete');
+
+      await prisma.message.update({
+        where: { id: victim.id },
+        data: { content: '', isDeleted: true, deletedAt: new Date() },
+      });
+
+      const after = await service.getHistory(channelId, {}, 50);
+
+      expect(after.messages).toHaveLength(4);
+      expect(after.messages[1]).toMatchObject({
+        id: victim.id,
+        isDeleted: true,
+      });
     });
   });
 });
