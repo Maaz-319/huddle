@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { RateLimiterModule } from './rate-limiter/rate-limiter.module';
 import { AdministrationModule } from './administration/administration.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AdministrationModule } from './administration/administration.module';
     AuthModule,
     RateLimiterModule,
     AdministrationModule,
+    ChatModule,
   ],
 })
 export class AppModule {}

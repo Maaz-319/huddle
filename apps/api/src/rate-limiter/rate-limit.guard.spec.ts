@@ -1,4 +1,4 @@
-import { ExecutionContext } from '@nestjs/common';
+import { BadRequestException, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { FakeRateLimitStore } from '../../test/fakes/fake-rate-limit-store';
@@ -29,11 +29,21 @@ class HandlerOverrideController {
   handler(): void {}
 }
 
+/**
+ * A channel-dimensioned policy, as `POST /channels/:channelId/messages`
+ * carries it. Its bucket cannot be keyed without a channel id off the route.
+ */
+@RateLimit('message-send')
+class ChannelPolicyController {
+  handler(): void {}
+}
+
 function fakeContext(
   target: object,
   handlerName: string,
   response: { setHeader: jest.Mock },
   sessionUserId?: string,
+  params: Record<string, string> = {},
 ): ExecutionContext {
   const handler = (target as Record<string, () => void>)[handlerName];
 
@@ -41,7 +51,11 @@ function fakeContext(
     getHandler: () => handler,
     getClass: () => target.constructor,
     switchToHttp: () => ({
-      getRequest: () => ({ ip: IP, session: { userId: sessionUserId } }),
+      getRequest: () => ({
+        ip: IP,
+        session: { userId: sessionUserId },
+        params,
+      }),
       getResponse: () => response,
     }),
   } as unknown as ExecutionContext;
@@ -149,5 +163,113 @@ describe('RateLimitGuard', () => {
         key: expect.stringContaining('strict-mutation') as string,
       }),
     );
+  });
+
+  describe('a channel-dimensioned policy', () => {
+    const CHANNEL_ID = '400000000000000001';
+    const OTHER_CHANNEL_ID = '400000000000000002';
+    const USER_ID = '300000000000000001';
+
+    it('keys the bucket on the :channelId route param', async () => {
+      const spend = jest.spyOn(store, 'consume');
+      const instance = new ChannelPolicyController();
+
+      await guard.canActivate(
+        fakeContext(instance, 'handler', response, USER_ID, {
+          channelId: CHANNEL_ID,
+        }),
+      );
+
+      expect(spend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: expect.stringContaining(`:channel:${CHANNEL_ID}`) as string,
+        }),
+      );
+    });
+
+    it('gives two channels two separate buckets', async () => {
+      // The whole point of the channel dimension: a burst in one channel must
+      // not spend another channel's budget. Keying on the user instead would
+      // still 429 plausibly, which is the version of this bug nobody notices.
+      const instance = new ChannelPolicyController();
+      const capacity = RATE_LIMIT_POLICIES['message-send'].capacity;
+
+      for (let i = 0; i < capacity; i += 1) {
+        await guard.canActivate(
+          fakeContext(instance, 'handler', response, USER_ID, {
+            channelId: CHANNEL_ID,
+          }),
+        );
+      }
+
+      await expect(
+        guard.canActivate(
+          fakeContext(instance, 'handler', response, USER_ID, {
+            channelId: CHANNEL_ID,
+          }),
+        ),
+      ).rejects.toBeInstanceOf(RateLimitedError);
+
+      await expect(
+        guard.canActivate(
+          fakeContext(instance, 'handler', response, USER_ID, {
+            channelId: OTHER_CHANNEL_ID,
+          }),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('keys on the channel even when the caller has a session', async () => {
+      // A user-dimensioned reading of the same request would key on userId;
+      // asserting the channel id is present is not enough on its own.
+      const spend = jest.spyOn(store, 'consume');
+      const instance = new ChannelPolicyController();
+
+      await guard.canActivate(
+        fakeContext(instance, 'handler', response, USER_ID, {
+          channelId: CHANNEL_ID,
+        }),
+      );
+
+      expect(spend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: expect.not.stringContaining(`:user:${USER_ID}`) as string,
+        }),
+      );
+    });
+
+    it('rejects a malformed channel id with a 400 rather than a 500', async () => {
+      // Guards run before pipes, so `/channels/abc/messages` reaches here with
+      // `abc` still a raw string. Passing it on as "no channel" would throw
+      // inside buildRateLimitKey and render as a 500.
+      const instance = new ChannelPolicyController();
+
+      await expect(
+        guard.canActivate(
+          fakeContext(instance, 'handler', response, USER_ID, {
+            channelId: 'not-a-snowflake',
+          }),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('does not read the route params for a policy of another dimension', async () => {
+      // Only channel-dimensioned policies pay for the lookup; a `read` route
+      // with a :channelId param still keys on the user.
+      const spend = jest.spyOn(store, 'consume');
+      const instance = new ClassPolicyController();
+
+      await guard.canActivate(
+        fakeContext(instance, 'handler', response, USER_ID, {
+          channelId: CHANNEL_ID,
+        }),
+      );
+
+      expect(spend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: expect.stringContaining(`:user:${USER_ID}`) as string,
+        }),
+      );
+    });
   });
 });
