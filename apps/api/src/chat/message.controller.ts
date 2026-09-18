@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -147,6 +148,34 @@ export class MessageController {
     );
 
     return toMessageResponse(message, this.snowflakes);
+  }
+
+  /**
+   * Deletes a message. Authors can retract their own messages; owners and
+   * moderators can remove anyone's. Deletion is a soft delete: the row stays,
+   * the content goes, and clients render "message deleted" in its place.
+   *
+   * `@RequireCapability('post')` — the weaker of the two capabilities. The
+   * guard proves the caller may post in this channel; the service then
+   * escalates to `delete_others` only when the caller is not the author.
+   * This two-step check is deliberate: the guard cannot know which applies,
+   * because it has not loaded the message.
+   *
+   * 204, no body: the caller asked for a side effect, not a representation.
+   * Idempotent: deleting an already-deleted message returns 204 without
+   * moving `deletedAt`.
+   */
+  @Delete(':messageId')
+  @UseGuards(RequireCapabilityGuard)
+  @RequireCapability('post')
+  @RateLimit('strict-mutation')
+  @HttpCode(204)
+  async remove(
+    @Param('channelId', ParseSnowflakePipe) channelId: bigint,
+    @Param('messageId', ParseSnowflakePipe) messageId: bigint,
+    @CurrentUser() user: User,
+  ): Promise<void> {
+    await this.chat.deleteMessage(channelId, messageId, user.id);
   }
 
   /**

@@ -3,6 +3,7 @@ import { ChannelMemberRepository } from '../administration/channel-member-reposi
 import { ChannelOverrideRepository } from '../administration/channel-override-repository.interface';
 import { ChannelRepository } from '../administration/channel-repository.interface';
 import { MembershipRepository } from '../administration/membership-repository.interface';
+import { resolveCapability } from '../auth/resolve-capability';
 import {
   ForbiddenError,
   NotFoundError,
@@ -116,6 +117,105 @@ export class ChatService {
     }
 
     return this.messages.updateContent(messageId, content);
+  }
+
+  /**
+   * Soft-deletes a message. This is the most authorization-complex method in
+   * the chat service, because the capability that applies depends on the row
+   * being deleted — something a single decorator cannot express.
+   *
+   * **The two-step check is deliberate:**
+   *
+   * 1. The route decorator uses `@RequireCapability('post')`, the weaker of
+   *    the two capabilities. The guard has already resolved `post` before this
+   *    method runs, including the owner short-circuit, the private-channel
+   *    hiding rule, and channel overrides. This covers the "delete your own"
+   *    case.
+   * 2. For "delete someone else's", we re-resolve `delete_others` using the
+   *    same `resolveCapability` path the guard uses. The guard cannot do this
+   *    because it has not loaded the message — it does not know whether the
+   *    caller is the author.
+   *
+   * The **owner** case needs no special code: `resolveCapability` short-
+   * circuits `owner` to allowed before it reads anything, including private-
+   * channel membership. Asserted in the contract suite rather than
+   * reimplemented here.
+   */
+  async deleteMessage(
+    channelId: bigint,
+    messageId: bigint,
+    callerId: bigint,
+  ): Promise<void> {
+    const message = await this.messages.findById(messageId);
+
+    if (message === null) {
+      throw new NotFoundError('Message not found', {
+        messageId: messageId.toString(),
+      });
+    }
+
+    if (message.channelId !== channelId) {
+      throw new NotFoundError('Message not found', {
+        messageId: messageId.toString(),
+      });
+    }
+
+    // The author always owns the right to retract their own message — the
+    // guard already proved `post`, which is the required capability.
+    if (message.authorId === callerId) {
+      await this.messages.softDelete(messageId);
+      return;
+    }
+
+    // Not the author: re-resolve `delete_others` for this caller in this
+    // channel. This is the same path RequireCapabilityGuard uses, so the
+    // owner short-circuit, the private-channel hiding rule, and channel
+    // overrides all apply identically.
+    const channel = await this.channels.findById(channelId);
+
+    // The channel was verified by the guard moments ago; if it is gone now,
+    // the write would also fail. Surface the same 404 the guard would have.
+    if (channel === null) {
+      throw new NotFoundError('Channel not found', {
+        channelId: channelId.toString(),
+      });
+    }
+
+    const membership = await this.memberships.findByServerAndUser(
+      channel.serverId,
+      callerId,
+    );
+
+    if (membership === null) {
+      throw new NotFoundError('Channel not found', {
+        channelId: channelId.toString(),
+      });
+    }
+
+    const [isChannelMember, overrides] = await Promise.all([
+      channel.isPrivate
+        ? this.channelMembers.isMember(channelId, callerId)
+        : Promise.resolve(false),
+      this.channelOverrides.findByChannelId(channelId),
+    ]);
+
+    const decision = resolveCapability(
+      {
+        role: membership.role,
+        isPrivate: channel.isPrivate,
+        isChannelMember,
+        overrides,
+      },
+      'delete_others',
+    );
+
+    if (!decision.allowed) {
+      throw new ForbiddenError('Insufficient capability', {
+        capability: 'delete_others',
+      });
+    }
+
+    await this.messages.softDelete(messageId);
   }
 
   /**
