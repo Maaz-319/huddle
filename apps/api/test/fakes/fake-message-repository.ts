@@ -56,4 +56,37 @@ export class FakeMessageRepository extends MessageRepository {
 
     return Promise.resolve(message === undefined ? null : { ...message });
   }
+
+  findPageBefore(
+    channelId: bigint,
+    before: bigint | null,
+    limit: number,
+  ): Promise<Message[]> {
+    const page = this.inChannel(channelId)
+      .filter((message) => before === null || message.id < before)
+      .sort((a, b) => (a.id < b.id ? 1 : -1))
+      .slice(0, limit);
+
+    return Promise.resolve(page);
+  }
+
+  findPageAfter(
+    channelId: bigint,
+    after: bigint,
+    limit: number,
+  ): Promise<Message[]> {
+    const page = this.inChannel(channelId)
+      .filter((message) => message.id > after)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .slice(0, limit);
+
+    return Promise.resolve(page);
+  }
+
+  /** Copies, so a caller mutating a returned message cannot reach the store. */
+  private inChannel(channelId: bigint): Message[] {
+    return [...this.messages.values()]
+      .filter((message) => message.channelId === channelId)
+      .map((message) => ({ ...message }));
+  }
 }
