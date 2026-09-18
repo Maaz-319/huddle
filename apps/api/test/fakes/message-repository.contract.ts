@@ -165,6 +165,76 @@ export function describeMessageRepositoryContract(
       });
     });
 
+    describe('updateContent', () => {
+      it('replaces the content and stamps editedAt', async () => {
+        const created = await messages.create({
+          channelId,
+          authorId: MESSAGE_AUTHOR_ID,
+          content: 'original',
+        });
+
+        const before = Date.now();
+        const updated = await messages.updateContent(created.id, 'edited');
+
+        expect(updated.content).toBe('edited');
+        expect(updated.editedAt).toBeInstanceOf(Date);
+        expect(updated.editedAt!.getTime()).toBeGreaterThanOrEqual(before);
+
+        // The row itself changed, not just the returned copy.
+        const stored = await messages.findById(created.id);
+        expect(stored?.content).toBe('edited');
+        expect(stored?.editedAt).toEqual(updated.editedAt);
+      });
+
+      it('rejects a message id that does not exist', async () => {
+        await expect(
+          messages.updateContent(NO_SUCH_MESSAGE, 'gone'),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
+
+    describe('softDelete', () => {
+      it('sets isDeleted, stamps deletedAt, and blanks the content', async () => {
+        const created = await messages.create({
+          channelId,
+          authorId: MESSAGE_AUTHOR_ID,
+          content: 'goodbye',
+        });
+
+        const before = Date.now();
+        const deleted = await messages.softDelete(created.id);
+
+        expect(deleted.isDeleted).toBe(true);
+        expect(deleted.deletedAt).toBeInstanceOf(Date);
+        expect(deleted.deletedAt!.getTime()).toBeGreaterThanOrEqual(before);
+        expect(deleted.content).toBe('');
+
+        const stored = await messages.findById(created.id);
+        expect(stored?.isDeleted).toBe(true);
+        expect(stored?.content).toBe('');
+      });
+
+      it('is idempotent — deleting twice does not move deletedAt', async () => {
+        const created = await messages.create({
+          channelId,
+          authorId: MESSAGE_AUTHOR_ID,
+          content: 'twice',
+        });
+
+        const first = await messages.softDelete(created.id);
+        const second = await messages.softDelete(created.id);
+
+        expect(second.deletedAt).toEqual(first.deletedAt);
+        expect(second.isDeleted).toBe(true);
+      });
+
+      it('rejects a message id that does not exist', async () => {
+        await expect(
+          messages.softDelete(NO_SUCH_MESSAGE),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      });
+    });
+
     /** `count` messages in the fixture channel, oldest first. */
     async function seedMessages(count: number): Promise<bigint[]> {
       const ids: bigint[] = [];

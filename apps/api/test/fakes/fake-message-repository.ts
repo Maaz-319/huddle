@@ -57,6 +57,43 @@ export class FakeMessageRepository extends MessageRepository {
     return Promise.resolve(message === undefined ? null : { ...message });
   }
 
+  updateContent(id: bigint, content: string): Promise<Message> {
+    const message = this.messages.get(id);
+
+    if (message === undefined) {
+      return Promise.reject(
+        new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        }),
+      );
+    }
+
+    message.content = content;
+    message.editedAt = new Date();
+
+    return Promise.resolve({ ...message });
+  }
+
+  softDelete(id: bigint): Promise<Message> {
+    const message = this.messages.get(id);
+
+    if (message === undefined) {
+      return Promise.reject(
+        new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        }),
+      );
+    }
+
+    message.isDeleted = true;
+    message.content = '';
+    if (message.deletedAt === null) {
+      message.deletedAt = new Date();
+    }
+
+    return Promise.resolve({ ...message });
+  }
+
   findPageBefore(
     channelId: bigint,
     before: bigint | null,

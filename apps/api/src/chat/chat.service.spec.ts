@@ -1,5 +1,13 @@
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../src/common/errors';
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
+import { FakeChannelMemberRepository } from '../../test/fakes/fake-channel-member-repository';
+import { FakeChannelOverrideRepository } from '../../test/fakes/fake-channel-override-repository';
 import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository';
+import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeMessageRepository } from '../../test/fakes/fake-message-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
 import { ChatService } from './chat.service';
@@ -10,14 +18,27 @@ const OWNER_ID = 350000000000000001n;
 describe('ChatService', () => {
   let service: ChatService;
   let messages: MessageRepository;
+  let channels: FakeChannelRepository;
+  let store: FakeAdministrationStore;
+  let channelOverrides: FakeChannelOverrideRepository;
+  let serverId: bigint;
   let channelId: bigint;
 
   beforeEach(async () => {
-    const store = new FakeAdministrationStore();
+    store = new FakeAdministrationStore();
     messages = new FakeMessageRepository(store);
-    const channels = new FakeChannelRepository(store);
+    channels = new FakeChannelRepository(store);
     const servers = new FakeServerRepository(store);
-    service = new ChatService(messages);
+    const memberships = new FakeMembershipRepository(store);
+    const channelMembers = new FakeChannelMemberRepository(store);
+    channelOverrides = new FakeChannelOverrideRepository(store);
+    service = new ChatService(
+      messages,
+      channels,
+      memberships,
+      channelMembers,
+      channelOverrides,
+    );
 
     const { server } = await servers.createWithOwner(
       {
@@ -28,6 +49,7 @@ describe('ChatService', () => {
       },
       OWNER_ID,
     );
+    serverId = server.id;
     const channel = await channels.create({
       serverId: server.id,
       name: 'general',
@@ -58,6 +80,82 @@ describe('ChatService', () => {
 
       expect(message.content).toBe('hello');
       await expect(messages.findById(message.id)).resolves.toEqual(message);
+    });
+  });
+
+  describe('editMessage', () => {
+    const OTHER_USER_ID = 350000000000000002n;
+
+    it('updates the content and stamps editedAt', async () => {
+      const message = await service.sendMessage(
+        channelId,
+        OWNER_ID,
+        'original',
+      );
+
+      const edited = await service.editMessage(
+        channelId,
+        message.id,
+        OWNER_ID,
+        'edited',
+      );
+
+      expect(edited.content).toBe('edited');
+      expect(edited.editedAt).toBeInstanceOf(Date);
+    });
+
+    it('throws NotFoundError for a nonexistent message', async () => {
+      await expect(
+        service.editMessage(channelId, 999n, OWNER_ID, 'nope'),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('throws NotFoundError when the message belongs to a different channel', async () => {
+      const other = await channels.create({
+        serverId,
+        name: 'other',
+        isPrivate: false,
+      });
+      const message = await service.sendMessage(
+        other.id,
+        OWNER_ID,
+        'in the other channel',
+      );
+
+      await expect(
+        service.editMessage(channelId, message.id, OWNER_ID, 'nope'),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('throws ForbiddenError when the caller is not the author', async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'mine');
+
+      await expect(
+        service.editMessage(channelId, message.id, OTHER_USER_ID, 'stolen'),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it('throws ValidationError when the message is soft-deleted', async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'doomed');
+      await messages.softDelete(message.id);
+
+      await expect(
+        service.editMessage(channelId, message.id, OWNER_ID, 'undelete'),
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    it('allows editing twice', async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'first');
+
+      await service.editMessage(channelId, message.id, OWNER_ID, 'second');
+      const edited = await service.editMessage(
+        channelId,
+        message.id,
+        OWNER_ID,
+        'third',
+      );
+
+      expect(edited.content).toBe('third');
     });
   });
 

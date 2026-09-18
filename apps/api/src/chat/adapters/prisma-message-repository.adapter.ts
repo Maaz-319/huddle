@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   FOREIGN_KEY_VIOLATION,
+  RECORD_NOT_FOUND,
   hasPrismaCode,
 } from '../../administration/adapters/prisma-codes';
 import { NotFoundError } from '../../common/errors';
@@ -53,6 +54,51 @@ export class PrismaMessageRepository extends MessageRepository {
     const row = await this.prisma.message.findUnique({ where: { id } });
 
     return row === null ? null : toMessage(row);
+  }
+
+  async updateContent(id: bigint, content: string): Promise<Message> {
+    try {
+      const row = await this.prisma.message.update({
+        where: { id },
+        data: { content, editedAt: new Date() },
+      });
+
+      return toMessage(row);
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  async softDelete(id: bigint): Promise<Message> {
+    try {
+      const existing = await this.prisma.message.findUnique({ where: { id } });
+
+      // Idempotent: already deleted → return unchanged, do not move deletedAt.
+      if (existing !== null && existing.isDeleted) {
+        return toMessage(existing);
+      }
+
+      const row = await this.prisma.message.update({
+        where: { id },
+        data: { isDeleted: true, deletedAt: new Date(), content: '' },
+      });
+
+      return toMessage(row);
+    } catch (error) {
+      if (hasPrismaCode(error, RECORD_NOT_FOUND)) {
+        throw new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        });
+      }
+
+      throw error;
+    }
   }
 
   async findPageBefore(

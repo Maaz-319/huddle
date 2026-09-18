@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -105,6 +107,41 @@ export class MessageController {
   ): Promise<MessageResponse> {
     const message = await this.chat.sendMessage(
       channelId,
+      user.id,
+      dto.content,
+    );
+
+    return toMessageResponse(message, this.snowflakes);
+  }
+
+  /**
+   * Edits a message. Only the author may edit their own message — not a
+   * moderator, not the server owner. Editing requires `post`, consistent with
+   * #62: losing `post` freezes your history.
+   *
+   * The route is nested under `:channelId` on purpose: `RequireCapabilityGuard`
+   * resolves capability from the `:channelId` route param and cannot work
+   * without one. The service still verifies `message.channelId` matches,
+   * because the guard proves nothing about which channel the *message* lives
+   * in — only which channel the *capability* was resolved for.
+   *
+   * Content validation is reused from `SendMessageDto` — same trim, same
+   * empty rejection, same 2048-character cap.
+   */
+  @Patch(':messageId')
+  @UseGuards(RequireCapabilityGuard)
+  @RequireCapability('post')
+  @RateLimit('strict-mutation')
+  @HttpCode(200)
+  async edit(
+    @Param('channelId', ParseSnowflakePipe) channelId: bigint,
+    @Param('messageId', ParseSnowflakePipe) messageId: bigint,
+    @Body() dto: SendMessageDto,
+    @CurrentUser() user: User,
+  ): Promise<MessageResponse> {
+    const message = await this.chat.editMessage(
+      channelId,
+      messageId,
       user.id,
       dto.content,
     );

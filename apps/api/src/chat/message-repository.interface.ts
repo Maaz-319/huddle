@@ -57,6 +57,29 @@ export abstract class MessageRepository {
   abstract findById(id: bigint): Promise<Message | null>;
 
   /**
+   * Replaces the stored content of a message and stamps `editedAt` to now.
+   *
+   * Throws `NotFoundError` when the message id does not exist — the message
+   * can be deleted between the guard's read and this write.
+   *
+   * The caller is responsible for verifying that the caller owns the message.
+   * This method stores; authorization is the service's job.
+   */
+  abstract updateContent(id: bigint, content: string): Promise<Message>;
+
+  /**
+   * Soft-deletes a message: sets `isDeleted`, stamps `deletedAt`, and blanks
+   * the stored content so the text is genuinely gone from the database rather
+   * than merely hidden by a flag someone can forget to check.
+   *
+   * Idempotent: deleting an already-deleted message returns the same row
+   * without moving `deletedAt`.
+   *
+   * Throws `NotFoundError` when the message id does not exist.
+   */
+  abstract softDelete(id: bigint): Promise<Message>;
+
+  /**
    * One page of history, scrolling *backwards*: the messages immediately
    * older than `before`, or the newest ones when it is `null`.
    *

@@ -1,4 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { ChannelMemberRepository } from '../administration/channel-member-repository.interface';
+import { ChannelOverrideRepository } from '../administration/channel-override-repository.interface';
+import { ChannelRepository } from '../administration/channel-repository.interface';
+import { MembershipRepository } from '../administration/membership-repository.interface';
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../common/errors';
 import { Message, MessageRepository } from './message-repository.interface';
 
 /**
@@ -34,7 +43,13 @@ export interface MessagePage {
  */
 @Injectable()
 export class ChatService {
-  constructor(private readonly messages: MessageRepository) {}
+  constructor(
+    private readonly messages: MessageRepository,
+    private readonly channels: ChannelRepository,
+    private readonly memberships: MembershipRepository,
+    private readonly channelMembers: ChannelMemberRepository,
+    private readonly channelOverrides: ChannelOverrideRepository,
+  ) {}
 
   /**
    * Stores a message. `content` is already trimmed and length-checked by
@@ -47,6 +62,60 @@ export class ChatService {
     content: string,
   ): Promise<Message> {
     return this.messages.create({ channelId, authorId, content });
+  }
+
+  /**
+   * Updates the content of an existing message. Three checks, in order:
+   *
+   * 1. **The message must exist.** A null from `findById` means the id is
+   *    unknown — 404, not 403, because the caller learns nothing about a
+   *    message that is not there.
+   * 2. **The message must belong to the channel in the URL.** Without this,
+   *    a caller who holds `post` in channel A could edit a message in channel
+   *    B by putting B's message id in A's URL. This is the whole reason the
+   *    nested route needs a check beyond what the guard provides.
+   * 3. **The caller must be the author.** Nobody edits anybody else's message
+   *    — not a moderator, not the server owner. `post` was already proved by
+   *    the guard; editing is writing, and losing `post` freezes your history.
+   *
+   * A soft-deleted message is rejected with 400: the caller can see the
+   * message exists (so 404 would be a lie), but resurrecting content after a
+   * delete would defeat the delete.
+   */
+  async editMessage(
+    channelId: bigint,
+    messageId: bigint,
+    callerId: bigint,
+    content: string,
+  ): Promise<Message> {
+    const message = await this.messages.findById(messageId);
+
+    if (message === null) {
+      throw new NotFoundError('Message not found', {
+        messageId: messageId.toString(),
+      });
+    }
+
+    if (message.channelId !== channelId) {
+      throw new NotFoundError('Message not found', {
+        messageId: messageId.toString(),
+      });
+    }
+
+    if (message.isDeleted) {
+      throw new ValidationError('This message has been deleted', {
+        messageId: messageId.toString(),
+      });
+    }
+
+    if (message.authorId !== callerId) {
+      throw new ForbiddenError("Cannot edit another user's message", {
+        messageId: messageId.toString(),
+        authorId: message.authorId.toString(),
+      });
+    }
+
+    return this.messages.updateContent(messageId, content);
   }
 
   /**

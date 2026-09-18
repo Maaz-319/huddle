@@ -1,8 +1,14 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaChannelMemberRepository } from '../src/administration/adapters/prisma-channel-member-repository.adapter';
+import { PrismaChannelOverrideRepository } from '../src/administration/adapters/prisma-channel-override-repository.adapter';
 import { PrismaChannelRepository } from '../src/administration/adapters/prisma-channel-repository.adapter';
+import { PrismaMembershipRepository } from '../src/administration/adapters/prisma-membership-repository.adapter';
 import { PrismaServerRepository } from '../src/administration/adapters/prisma-server-repository.adapter';
+import { ChannelMemberRepository } from '../src/administration/channel-member-repository.interface';
+import { ChannelOverrideRepository } from '../src/administration/channel-override-repository.interface';
 import { ChannelRepository } from '../src/administration/channel-repository.interface';
+import { MembershipRepository } from '../src/administration/membership-repository.interface';
 import { ServerRepository } from '../src/administration/server-repository.interface';
 import { PrismaMessageRepository } from '../src/chat/adapters/prisma-message-repository.adapter';
 import { ChatService } from '../src/chat/chat.service';
@@ -43,6 +49,9 @@ describe('the chat Prisma adapters', () => {
   let messages: MessageRepository;
   let channels: ChannelRepository;
   let servers: ServerRepository;
+  let memberships: MembershipRepository;
+  let channelMembers: ChannelMemberRepository;
+  let channelOverrides: ChannelOverrideRepository;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -55,6 +64,15 @@ describe('the chat Prisma adapters', () => {
         { provide: ServerRepository, useClass: PrismaServerRepository },
         { provide: ChannelRepository, useClass: PrismaChannelRepository },
         { provide: MessageRepository, useClass: PrismaMessageRepository },
+        { provide: MembershipRepository, useClass: PrismaMembershipRepository },
+        {
+          provide: ChannelMemberRepository,
+          useClass: PrismaChannelMemberRepository,
+        },
+        {
+          provide: ChannelOverrideRepository,
+          useClass: PrismaChannelOverrideRepository,
+        },
       ],
     }).compile();
 
@@ -63,6 +81,9 @@ describe('the chat Prisma adapters', () => {
     messages = module.get(MessageRepository);
     channels = module.get(ChannelRepository);
     servers = module.get(ServerRepository);
+    memberships = module.get(MembershipRepository);
+    channelMembers = module.get(ChannelMemberRepository);
+    channelOverrides = module.get(ChannelOverrideRepository);
   });
 
   afterAll(async () => {
@@ -185,7 +206,13 @@ describe('the chat Prisma adapters', () => {
         isPrivate: false,
       });
       channelId = channel.id;
-      service = new ChatService(messages);
+      service = new ChatService(
+        messages,
+        channels,
+        memberships,
+        channelMembers,
+        channelOverrides,
+      );
     });
 
     afterEach(() => {

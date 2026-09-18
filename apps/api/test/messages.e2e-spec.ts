@@ -433,6 +433,109 @@ describe('the channel message routes (e2e)', () => {
     });
   });
 
+  describe('PATCH /channels/:channelId/messages/:messageId', () => {
+    it('updates the content and returns 200 with the edited message', async () => {
+      const { channelId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'original' });
+      const messageId = idOf(sent.body);
+
+      const response = await member
+        .patch(`/channels/${channelId}/messages/${messageId}`)
+        .send({ content: 'edited' });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        content: 'edited',
+        isDeleted: false,
+      });
+      const body = response.body as { editedAt: string | null };
+      expect(body.editedAt).not.toBeNull();
+
+      const stored = await prisma.message.findUnique({
+        where: { id: BigInt(messageId) },
+      });
+      expect(stored?.content).toBe('edited');
+    });
+
+    it('gives 403 when the caller is not the author', async () => {
+      const { channelId, member, owner } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'mine' });
+      const messageId = idOf(sent.body);
+
+      // The owner is not the author of member's message.
+      const response = await owner
+        .patch(`/channels/${channelId}/messages/${messageId}`)
+        .send({ content: 'hijacked' });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('gives 404 when the message belongs to a different channel', async () => {
+      const { channelId, siblingId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'here' });
+      const messageId = idOf(sent.body);
+
+      const response = await member
+        .patch(`/channels/${siblingId}/messages/${messageId}`)
+        .send({ content: 'wrong channel' });
+
+      expect(response.status).toBe(404);
+    });
+
+    it('rejects editing a soft-deleted message with 400', async () => {
+      const { channelId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'doomed' });
+      const messageId = idOf(sent.body);
+
+      await prisma.message.update({
+        where: { id: BigInt(messageId) },
+        data: { isDeleted: true, deletedAt: new Date(), content: '' },
+      });
+
+      const response = await member
+        .patch(`/channels/${channelId}/messages/${messageId}`)
+        .send({ content: 'undelete' });
+
+      expect(response.status).toBe(400);
+      expect(errorOf(response.body).message).toContain('deleted');
+    });
+
+    it('gives 403 to a member whose post an override revoked', async () => {
+      const { channelId, member, owner } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'mine' });
+      const messageId = idOf(sent.body);
+
+      await owner.put(`/channels/${channelId}/overrides/member/post`);
+      await resetBudget('strict-mutation');
+
+      const response = await member
+        .patch(`/channels/${channelId}/messages/${messageId}`)
+        .send({ content: 'nope' });
+
+      expect(response.status).toBe(403);
+    });
+
+    it('gives 401 with no session', async () => {
+      const { channelId } = await seed();
+
+      const response = await request(app.getHttpServer())
+        .patch(`/channels/${channelId}/messages/123`)
+        .send({ content: 'anonymous' });
+
+      expect(response.status).toBe(401);
+    });
+  });
+
   describe('GET /channels/:channelId/messages', () => {
     /** `count` messages posted straight into the table, oldest first. */
     async function seedHistory(
