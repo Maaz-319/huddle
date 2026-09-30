@@ -24,7 +24,8 @@ describe('CursorPaginationDto', () => {
 
     expect(errors).toHaveLength(0);
     expect(dto.limit).toBe(DEFAULT_PAGE_SIZE);
-    expect(dto.cursor).toBeUndefined();
+    expect(dto.before).toBeUndefined();
+    expect(dto.after).toBeUndefined();
   });
 
   it('converts the query string limit to a number', () => {
@@ -45,20 +46,53 @@ describe('CursorPaginationDto', () => {
     },
   );
 
-  it('turns a Snowflake cursor into a bigint', () => {
+  it('turns a `before` cursor into a bigint', () => {
     const { dto, errors } = parse({
       limit: '10',
-      cursor: '175928847299117063',
+      before: '175928847299117063',
     });
 
     expect(errors).toHaveLength(0);
-    expect(dto.cursor).toBe(175928847299117063n);
+    expect(dto.before).toBe(175928847299117063n);
+  });
+
+  it('turns an `after` cursor into a bigint', () => {
+    const { dto, errors } = parse({ after: '175928847299117063' });
+
+    expect(errors).toHaveLength(0);
+    expect(dto.after).toBe(175928847299117063n);
+  });
+
+  it('rejects both cursors together, and says they are exclusive', () => {
+    // There is no sensible page that is both before X and after Y, and the
+    // service must never be handed one to invent a precedence rule for.
+    const { errors } = parse({
+      before: '175928847299117063',
+      after: '175928847299117064',
+    });
+
+    expect(errors.map((error) => error.property)).toEqual(['after']);
+    expect(Object.values(errors[0]?.constraints ?? {})).toContain(
+      'before and after are mutually exclusive',
+    );
+  });
+
+  it('accepts either cursor on its own', () => {
+    expect(failingProperties({ before: '175928847299117063' })).toEqual([]);
+    expect(failingProperties({ after: '175928847299117063' })).toEqual([]);
   });
 
   it.each([['not-a-snowflake'], ['-1'], ['12.5'], [1759288472991]])(
-    'rejects a cursor of %p',
-    (cursor) => {
-      expect(failingProperties({ cursor })).toEqual(['cursor']);
+    'rejects a `before` cursor of %p',
+    (before) => {
+      expect(failingProperties({ before })).toEqual(['before']);
+    },
+  );
+
+  it.each([['not-a-snowflake'], ['-1'], ['12.5'], [1759288472991]])(
+    'rejects an `after` cursor of %p',
+    (after) => {
+      expect(failingProperties({ after })).toEqual(['after']);
     },
   );
 });

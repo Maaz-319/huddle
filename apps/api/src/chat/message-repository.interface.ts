@@ -55,4 +55,64 @@ export abstract class MessageRepository {
 
   /** The message with this id, or `null`. Soft-deleted rows are returned. */
   abstract findById(id: bigint): Promise<Message | null>;
+
+  /**
+   * Replaces the stored content of a message and stamps `editedAt` to now.
+   *
+   * Throws `NotFoundError` when the message id does not exist — the message
+   * can be deleted between the guard's read and this write.
+   *
+   * The caller is responsible for verifying that the caller owns the message.
+   * This method stores; authorization is the service's job.
+   */
+  abstract updateContent(id: bigint, content: string): Promise<Message>;
+
+  /**
+   * Soft-deletes a message: sets `isDeleted`, stamps `deletedAt`, and blanks
+   * the stored content so the text is genuinely gone from the database rather
+   * than merely hidden by a flag someone can forget to check.
+   *
+   * Idempotent: deleting an already-deleted message returns the same row
+   * without moving `deletedAt`.
+   *
+   * Throws `NotFoundError` when the message id does not exist.
+   */
+  abstract softDelete(id: bigint): Promise<Message>;
+
+  /**
+   * One page of history, scrolling *backwards*: the messages immediately
+   * older than `before`, or the newest ones when it is `null`.
+   *
+   * Ordered **newest first** and capped at `limit`. The order is the one the
+   * `@@index([channelId, id])` index already holds, so the database does the
+   * work rather than sorting a result set; the caller reverses the page if it
+   * wants it the other way round. `ChatService.getHistory` is that caller and
+   * does exactly that.
+   *
+   * Soft-deleted messages are included, and count toward `limit`. History
+   * renders a "message deleted" placeholder in their place (PRD FR-18/FR-19),
+   * and filtering them out here would make two pages of the same window
+   * disagree about where the boundary is.
+   */
+  abstract findPageBefore(
+    channelId: bigint,
+    before: bigint | null,
+    limit: number,
+  ): Promise<Message[]>;
+
+  /**
+   * One page of history, scrolling *forwards*: the messages newer than
+   * `after`, oldest first, capped at `limit`.
+   *
+   * The reconnect catch-up direction (chat-service.md section 6) — "here is
+   * the last id I hold, give me what I missed". Unlike `findPageBefore` there
+   * is no unbounded form: catching up from nothing is `findPageBefore(null)`.
+   *
+   * Soft-deleted messages are included here too, for the same reason.
+   */
+  abstract findPageAfter(
+    channelId: bigint,
+    after: bigint,
+    limit: number,
+  ): Promise<Message[]>;
 }

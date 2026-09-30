@@ -56,4 +56,74 @@ export class FakeMessageRepository extends MessageRepository {
 
     return Promise.resolve(message === undefined ? null : { ...message });
   }
+
+  updateContent(id: bigint, content: string): Promise<Message> {
+    const message = this.messages.get(id);
+
+    if (message === undefined) {
+      return Promise.reject(
+        new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        }),
+      );
+    }
+
+    message.content = content;
+    message.editedAt = new Date();
+
+    return Promise.resolve({ ...message });
+  }
+
+  softDelete(id: bigint): Promise<Message> {
+    const message = this.messages.get(id);
+
+    if (message === undefined) {
+      return Promise.reject(
+        new NotFoundError('Message not found', {
+          messageId: id.toString(),
+        }),
+      );
+    }
+
+    message.isDeleted = true;
+    message.content = '';
+    if (message.deletedAt === null) {
+      message.deletedAt = new Date();
+    }
+
+    return Promise.resolve({ ...message });
+  }
+
+  findPageBefore(
+    channelId: bigint,
+    before: bigint | null,
+    limit: number,
+  ): Promise<Message[]> {
+    const page = this.inChannel(channelId)
+      .filter((message) => before === null || message.id < before)
+      .sort((a, b) => (a.id < b.id ? 1 : -1))
+      .slice(0, limit);
+
+    return Promise.resolve(page);
+  }
+
+  findPageAfter(
+    channelId: bigint,
+    after: bigint,
+    limit: number,
+  ): Promise<Message[]> {
+    const page = this.inChannel(channelId)
+      .filter((message) => message.id > after)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .slice(0, limit);
+
+    return Promise.resolve(page);
+  }
+
+  /** Copies, so a caller mutating a returned message cannot reach the store. */
+  private inChannel(channelId: bigint): Message[] {
+    return [...this.messages.values()]
+      .filter((message) => message.channelId === channelId)
+      .map((message) => ({ ...message }));
+  }
 }
