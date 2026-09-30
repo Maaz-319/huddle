@@ -159,6 +159,139 @@ describe('ChatService', () => {
     });
   });
 
+  describe('deleteMessage', () => {
+    const MODERATOR_ID = 350000000000000003n;
+    const MEMBER_ID = 350000000000000004n;
+
+    beforeEach(() => {
+      // Seat a moderator and a plain member in the server.
+      store.memberships.set(`${serverId}:${MODERATOR_ID}`, {
+        serverId,
+        userId: MODERATOR_ID,
+        role: 'moderator',
+        joinedAt: new Date(),
+      });
+      store.memberships.set(`${serverId}:${MEMBER_ID}`, {
+        serverId,
+        userId: MEMBER_ID,
+        role: 'member',
+        joinedAt: new Date(),
+      });
+    });
+
+    it('soft-deletes own message', async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'doomed');
+
+      await service.deleteMessage(channelId, message.id, OWNER_ID);
+
+      const stored = await messages.findById(message.id);
+      expect(stored?.isDeleted).toBe(true);
+      expect(stored?.content).toBe('');
+    });
+
+    it("lets a moderator delete another user's message", async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'victim');
+
+      await service.deleteMessage(channelId, message.id, MODERATOR_ID);
+
+      const stored = await messages.findById(message.id);
+      expect(stored?.isDeleted).toBe(true);
+    });
+
+    it("throws ForbiddenError when a plain member tries to delete another's message", async () => {
+      const message = await service.sendMessage(
+        channelId,
+        OWNER_ID,
+        'protected',
+      );
+
+      await expect(
+        service.deleteMessage(channelId, message.id, MEMBER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it('throws NotFoundError for a nonexistent message', async () => {
+      await expect(
+        service.deleteMessage(channelId, 999n, OWNER_ID),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('throws NotFoundError when the message belongs to a different channel', async () => {
+      const other = await channels.create({
+        serverId,
+        name: 'other',
+        isPrivate: false,
+      });
+      const message = await service.sendMessage(
+        other.id,
+        OWNER_ID,
+        'elsewhere',
+      );
+
+      await expect(
+        service.deleteMessage(channelId, message.id, OWNER_ID),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('is idempotent — deleting twice returns without error', async () => {
+      const message = await service.sendMessage(channelId, OWNER_ID, 'twice');
+
+      await service.deleteMessage(channelId, message.id, OWNER_ID);
+      await service.deleteMessage(channelId, message.id, OWNER_ID);
+
+      const stored = await messages.findById(message.id);
+      expect(stored?.isDeleted).toBe(true);
+    });
+
+    it('lets the owner delete in a private channel without a ChannelMember row', async () => {
+      const priv = await channels.create({
+        serverId,
+        name: 'secret',
+        isPrivate: true,
+      });
+      // Owner posts directly (bypasses the channel-membership check the guard
+      // would enforce — the owner short-circuits before it reads that table).
+      const message = await service.sendMessage(priv.id, OWNER_ID, 'secret');
+
+      await service.deleteMessage(priv.id, message.id, OWNER_ID);
+
+      const stored = await messages.findById(message.id);
+      expect(stored?.isDeleted).toBe(true);
+    });
+
+    it('gets 403 when delete_others is revoked for moderators on one channel but still succeeds in a sibling', async () => {
+      const otherChannel = await channels.create({
+        serverId,
+        name: 'other',
+        isPrivate: false,
+      });
+
+      const msgInCurrent = await service.sendMessage(
+        channelId,
+        OWNER_ID,
+        'in general',
+      );
+      const msgInOther = await service.sendMessage(
+        otherChannel.id,
+        OWNER_ID,
+        'in other',
+      );
+
+      // Revoke delete_others for moderators on the default channel.
+      await channelOverrides.revoke(channelId, 'moderator', 'delete_others');
+
+      // Moderator can no longer delete here.
+      await expect(
+        service.deleteMessage(channelId, msgInCurrent.id, MODERATOR_ID),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+
+      // …but still can in the sibling channel (no override there).
+      await service.deleteMessage(otherChannel.id, msgInOther.id, MODERATOR_ID);
+      const stored = await messages.findById(msgInOther.id);
+      expect(stored?.isDeleted).toBe(true);
+    });
+  });
+
   describe('getHistory', () => {
     it('returns the newest page when neither cursor is given', async () => {
       const ids = await seed(5);
