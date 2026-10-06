@@ -1,3 +1,6 @@
+import type { IncomingMessage } from 'http';
+import proxyaddr from 'proxy-addr';
+
 /**
  * Teaches Express how many reverse-proxy hops sit in front of the app, so that
  * `req.ip` is the client's address rather than the proxy's.
@@ -28,4 +31,25 @@ export function configureTrustProxy(
   hops: number,
 ): void {
   app.set('trust proxy', hops);
+}
+
+/**
+ * The client's address for a request Express never sees — the socket.io
+ * handshake, whose `IncomingMessage` has no `req.ip` getter (#64).
+ *
+ * Same library Express uses for `req.ip`, and the trust function is compiled
+ * the way Express compiles a numeric `trust proxy` setting: a hop count
+ * becomes `i < hops`, counting trusted entries from the right
+ * (`express/lib/utils.js` `compileTrust`, `express/lib/request.js`
+ * `proxyaddr(this, trust)`). `proxyaddr.compile` cannot be used here — it
+ * accepts only strings and arrays, and rejects `0`, the local default. A hop
+ * count that drifts between REST and the WebSocket would key their buckets on
+ * different addresses for the same caller — one shared bucket behind the
+ * proxy, or fresh buckets from a forged `X-Forwarded-For`, exactly the
+ * failures `configureTrustProxy` exists to prevent. `trust-proxy.spec.ts`
+ * asserts the two agree.
+ */
+export function resolveClientIp(req: IncomingMessage, hops: number): string {
+  const trust = (address: string, index: number): boolean => index < hops;
+  return proxyaddr(req, trust);
 }
