@@ -3,6 +3,10 @@ import { ChannelMemberRepository } from '../administration/channel-member-reposi
 import { ChannelOverrideRepository } from '../administration/channel-override-repository.interface';
 import { ChannelRepository } from '../administration/channel-repository.interface';
 import { MembershipRepository } from '../administration/membership-repository.interface';
+import {
+  capabilityRefusalError,
+  hiddenChannelError,
+} from '../auth/capability-refusal';
 import { resolveCapability } from '../auth/resolve-capability';
 import {
   ForbiddenError,
@@ -36,11 +40,18 @@ export interface MessagePage {
  * calls these same methods rather than reimplementing them, which is the
  * reason this is a service and not logic inlined into the controller.
  *
- * It deliberately holds no permission checks. `RequireCapabilityGuard` has
- * already resolved the caller's effective capability in the channel by the
- * time a method here runs, including the owner short-circuit, the
- * private-channel hiding rule, and channel overrides. A second check here
- * would be a second copy of a rule that already has one home.
+ * For the REST routes it deliberately holds no permission checks of its own:
+ * `RequireCapabilityGuard` has already resolved the caller's effective
+ * capability by the time a method here runs — owner short-circuit, private
+ * channel hiding rule, channel overrides included. A second check here would
+ * be a second copy of a rule that already has one home.
+ *
+ * The socket path is the exception that proves the arrangement: gateway event
+ * handlers have no guard around them (Nest does not apply route guards there
+ * the way they run on HTTP), so `requirePost` is the one place a socket
+ * caller's capability is resolved — through the same `resolveCapability` and
+ * the same `capabilityRefusalError` mapping the guard uses, not a second copy
+ * of either.
  */
 @Injectable()
 export class ChatService {
@@ -53,16 +64,80 @@ export class ChatService {
   ) {}
 
   /**
-   * Stores a message. `content` is already trimmed and length-checked by
-   * `SendMessageDto`; the id and creation time both come from the Snowflake
-   * the repository mints.
+   * Stores a message — **the** write path, the one both the REST `POST` and
+   * the socket's `message_send` handler go through (#65). Two write paths
+   * would be two places to forget an authorization check; the checks differ
+   * per transport (guard vs `requirePost`), the write does not.
+   *
+   * `content` is already trimmed and length-checked by `SendMessageDto` (the
+   * frame DTO extends it); the id and creation time both come from the
+   * Snowflake the repository mints.
    */
-  sendMessage(
+  postMessage(
     channelId: bigint,
     authorId: bigint,
     content: string,
   ): Promise<Message> {
     return this.messages.create({ channelId, authorId, content });
+  }
+
+  /**
+   * Resolves `post` for `(caller, channel)`, throwing exactly what
+   * `RequireCapabilityGuard` would have thrown had this been an HTTP route —
+   * the same `resolveCapability` decision and the same
+   * `capabilityRefusalError` mapping.
+   *
+   * This exists for callers with **no guard in front of them**: the gateway's
+   * event handlers (Nest guards on a controller do not run around a socket
+   * handler the way they run on a route, so `@RequireCapability` would save
+   * nothing there). REST routes keep using the guard; nothing on the HTTP
+   * path calls this.
+   *
+   * The loading sequence mirrors the guard step for step — channel first
+   * (there is no `:serverId` on the frame, so `channel.serverId` is what the
+   * membership keys on), then the membership, owner short-circuit before any
+   * channel-scoped table is read. The *rules* are not mirrored: they are
+   * `resolveCapability`'s, single-homed.
+   */
+  async requirePost(channelId: bigint, userId: bigint): Promise<void> {
+    const rawChannelId = channelId.toString();
+
+    const channel = await this.channels.findById(channelId);
+
+    if (channel === null) throw hiddenChannelError(rawChannelId);
+
+    const membership = await this.memberships.findByServerAndUser(
+      channel.serverId,
+      userId,
+    );
+
+    // 404, not 403: a non-member of the server must not learn the id exists.
+    if (membership === null) throw hiddenChannelError(rawChannelId);
+
+    // The owner short-circuits before either channel-scoped table is read —
+    // a channel can never lock an owner out (PRD section 5).
+    if (membership.role === 'owner') return;
+
+    const [isChannelMember, overrides] = await Promise.all([
+      channel.isPrivate
+        ? this.channelMembers.isMember(channelId, userId)
+        : Promise.resolve(false),
+      this.channelOverrides.findByChannelId(channelId),
+    ]);
+
+    const decision = resolveCapability(
+      {
+        role: membership.role,
+        isPrivate: channel.isPrivate,
+        isChannelMember,
+        overrides,
+      },
+      'post',
+    );
+
+    if (!decision.allowed) {
+      throw capabilityRefusalError(decision, 'post', rawChannelId);
+    }
   }
 
   /**

@@ -20,6 +20,8 @@ describe('ChatService', () => {
   let messages: MessageRepository;
   let channels: FakeChannelRepository;
   let store: FakeAdministrationStore;
+  let memberships: FakeMembershipRepository;
+  let channelMembers: FakeChannelMemberRepository;
   let channelOverrides: FakeChannelOverrideRepository;
   let serverId: bigint;
   let channelId: bigint;
@@ -29,8 +31,8 @@ describe('ChatService', () => {
     messages = new FakeMessageRepository(store);
     channels = new FakeChannelRepository(store);
     const servers = new FakeServerRepository(store);
-    const memberships = new FakeMembershipRepository(store);
-    const channelMembers = new FakeChannelMemberRepository(store);
+    memberships = new FakeMembershipRepository(store);
+    channelMembers = new FakeChannelMemberRepository(store);
     channelOverrides = new FakeChannelOverrideRepository(store);
     service = new ChatService(
       messages,
@@ -63,7 +65,7 @@ describe('ChatService', () => {
     const ids: bigint[] = [];
 
     for (let index = 0; index < count; index += 1) {
-      const message = await service.sendMessage(
+      const message = await service.postMessage(
         channelId,
         OWNER_ID,
         `message ${index}`,
@@ -74,12 +76,93 @@ describe('ChatService', () => {
     return ids;
   }
 
-  describe('sendMessage', () => {
+  describe('postMessage', () => {
     it('stores the content it was given', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'hello');
+      const message = await service.postMessage(channelId, OWNER_ID, 'hello');
 
       expect(message.content).toBe('hello');
       await expect(messages.findById(message.id)).resolves.toEqual(message);
+    });
+  });
+
+  describe('requirePost', () => {
+    const MEMBER_ID = 350000000000000003n;
+
+    it('lets the server owner through with no membership loading', async () => {
+      // No membership row for the owner is created here at all: had
+      // `requirePost` not short-circuited, the membership lookup would come
+      // back null and this would reject with the hiding 404.
+      await expect(
+        service.requirePost(channelId, OWNER_ID),
+      ).resolves.toBeUndefined();
+    });
+
+    it('lets a member of a public channel through', async () => {
+      await memberships.create({
+        serverId,
+        userId: MEMBER_ID,
+        role: 'member',
+      });
+
+      await expect(
+        service.requirePost(channelId, MEMBER_ID),
+      ).resolves.toBeUndefined();
+    });
+
+    it('refuses a member whose post an override revoked', async () => {
+      await memberships.create({
+        serverId,
+        userId: MEMBER_ID,
+        role: 'member',
+      });
+      await channelOverrides.revoke(channelId, 'member', 'post');
+
+      await expect(
+        service.requirePost(channelId, MEMBER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it('hides the channel from a non-member of the server', async () => {
+      await expect(service.requirePost(channelId, MEMBER_ID)).rejects.toEqual(
+        new NotFoundError('Channel not found', {
+          channelId: channelId.toString(),
+        }),
+      );
+    });
+
+    it('hides a private channel the caller holds no seat in', async () => {
+      const privateChannel = await channels.create({
+        serverId,
+        name: 'private',
+        isPrivate: true,
+      });
+      await memberships.create({
+        serverId,
+        userId: MEMBER_ID,
+        role: 'member',
+      });
+
+      await expect(
+        service.requirePost(privateChannel.id, MEMBER_ID),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('lets a seated member of a private channel through', async () => {
+      const privateChannel = await channels.create({
+        serverId,
+        name: 'private',
+        isPrivate: true,
+      });
+      await memberships.create({
+        serverId,
+        userId: MEMBER_ID,
+        role: 'member',
+      });
+      await channelMembers.add(privateChannel.id, MEMBER_ID);
+
+      await expect(
+        service.requirePost(privateChannel.id, MEMBER_ID),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -87,7 +170,7 @@ describe('ChatService', () => {
     const OTHER_USER_ID = 350000000000000002n;
 
     it('updates the content and stamps editedAt', async () => {
-      const message = await service.sendMessage(
+      const message = await service.postMessage(
         channelId,
         OWNER_ID,
         'original',
@@ -116,7 +199,7 @@ describe('ChatService', () => {
         name: 'other',
         isPrivate: false,
       });
-      const message = await service.sendMessage(
+      const message = await service.postMessage(
         other.id,
         OWNER_ID,
         'in the other channel',
@@ -128,7 +211,7 @@ describe('ChatService', () => {
     });
 
     it('throws ForbiddenError when the caller is not the author', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'mine');
+      const message = await service.postMessage(channelId, OWNER_ID, 'mine');
 
       await expect(
         service.editMessage(channelId, message.id, OTHER_USER_ID, 'stolen'),
@@ -136,7 +219,7 @@ describe('ChatService', () => {
     });
 
     it('throws ValidationError when the message is soft-deleted', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'doomed');
+      const message = await service.postMessage(channelId, OWNER_ID, 'doomed');
       await messages.softDelete(message.id);
 
       await expect(
@@ -145,7 +228,7 @@ describe('ChatService', () => {
     });
 
     it('allows editing twice', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'first');
+      const message = await service.postMessage(channelId, OWNER_ID, 'first');
 
       await service.editMessage(channelId, message.id, OWNER_ID, 'second');
       const edited = await service.editMessage(
@@ -180,7 +263,7 @@ describe('ChatService', () => {
     });
 
     it('soft-deletes own message', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'doomed');
+      const message = await service.postMessage(channelId, OWNER_ID, 'doomed');
 
       await service.deleteMessage(channelId, message.id, OWNER_ID);
 
@@ -190,7 +273,7 @@ describe('ChatService', () => {
     });
 
     it("lets a moderator delete another user's message", async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'victim');
+      const message = await service.postMessage(channelId, OWNER_ID, 'victim');
 
       await service.deleteMessage(channelId, message.id, MODERATOR_ID);
 
@@ -199,7 +282,7 @@ describe('ChatService', () => {
     });
 
     it("throws ForbiddenError when a plain member tries to delete another's message", async () => {
-      const message = await service.sendMessage(
+      const message = await service.postMessage(
         channelId,
         OWNER_ID,
         'protected',
@@ -222,7 +305,7 @@ describe('ChatService', () => {
         name: 'other',
         isPrivate: false,
       });
-      const message = await service.sendMessage(
+      const message = await service.postMessage(
         other.id,
         OWNER_ID,
         'elsewhere',
@@ -234,7 +317,7 @@ describe('ChatService', () => {
     });
 
     it('is idempotent — deleting twice returns without error', async () => {
-      const message = await service.sendMessage(channelId, OWNER_ID, 'twice');
+      const message = await service.postMessage(channelId, OWNER_ID, 'twice');
 
       await service.deleteMessage(channelId, message.id, OWNER_ID);
       await service.deleteMessage(channelId, message.id, OWNER_ID);
@@ -251,7 +334,7 @@ describe('ChatService', () => {
       });
       // Owner posts directly (bypasses the channel-membership check the guard
       // would enforce — the owner short-circuits before it reads that table).
-      const message = await service.sendMessage(priv.id, OWNER_ID, 'secret');
+      const message = await service.postMessage(priv.id, OWNER_ID, 'secret');
 
       await service.deleteMessage(priv.id, message.id, OWNER_ID);
 
@@ -266,12 +349,12 @@ describe('ChatService', () => {
         isPrivate: false,
       });
 
-      const msgInCurrent = await service.sendMessage(
+      const msgInCurrent = await service.postMessage(
         channelId,
         OWNER_ID,
         'in general',
       );
-      const msgInOther = await service.sendMessage(
+      const msgInOther = await service.postMessage(
         otherChannel.id,
         OWNER_ID,
         'in other',
@@ -384,7 +467,7 @@ describe('ChatService', () => {
       const ids = await seed(4);
       const first = await service.getHistory(channelId, {}, 2);
 
-      await service.sendMessage(channelId, OWNER_ID, 'arrived mid-scroll');
+      await service.postMessage(channelId, OWNER_ID, 'arrived mid-scroll');
 
       const oldest = first.messages[0];
       const second = await service.getHistory(
