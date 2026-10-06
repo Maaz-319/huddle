@@ -14,13 +14,14 @@ import { MessageRepository } from './message-repository.interface';
  *
  * `AuthModule` is imported for `SessionAuthGuard`.
  *
- * `AdministrationModule` is imported for `RequireCapabilityGuard`'s sake, not
- * this module's own. `ChatService` needs neither channels nor memberships —
- * the guard has already settled access before it runs. But Nest instantiates
- * a `@UseGuards(Class)` enhancer in the *host* module's injector, so
- * `MessageController`'s guard resolves its `ChannelRepository`,
- * `MembershipRepository`, `ChannelMemberRepository` and
- * `ChannelOverrideRepository` here, from that module's exports.
+ * `AdministrationModule` is imported for `RequireCapabilityGuard`'s sake and
+ * for `ChatService`'s delete authorization. The guard needs the channel,
+ * membership, channel-member and channel-override repositories to resolve the
+ * caller's effective capability. `ChatService.deleteMessage` re-resolves
+ * `delete_others` using the same `resolveCapability` path the guard uses, so
+ * it needs the same four ports — but for a different message: the guard
+ * settles access before the handler runs; the service escalates to
+ * `delete_others` only when the caller is not the author.
  *
  * The guard is then listed below for the same reason `AdministrationModule`
  * lists it: so the wiring is a declaration rather than something that happens

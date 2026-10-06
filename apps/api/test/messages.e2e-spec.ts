@@ -536,6 +536,108 @@ describe('the channel message routes (e2e)', () => {
     });
   });
 
+  describe('DELETE /channels/:channelId/messages/:messageId', () => {
+    it('soft-deletes own message and returns 204', async () => {
+      const { channelId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'doomed' });
+      const messageId = idOf(sent.body);
+
+      const response = await member.delete(
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+
+      expect(response.status).toBe(204);
+
+      const stored = await prisma.message.findUnique({
+        where: { id: BigInt(messageId) },
+      });
+      expect(stored?.isDeleted).toBe(true);
+      expect(stored?.content).toBe('');
+    });
+
+    it("lets a moderator delete another user's message", async () => {
+      const { channelId, member, owner } = await seed();
+
+      // Find the member's user and promote to moderator.
+      const memberUser = await prisma.user.findUnique({
+        where: { githubId: String(MEMBER.githubId) },
+      });
+      if (memberUser === null) throw new Error('No member user');
+      await prisma.membership.updateMany({
+        where: { userId: memberUser.id },
+        data: { role: 'moderator' },
+      });
+
+      const sent = await owner
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'owner msg' });
+
+      const response = await member.delete(
+        `/channels/${channelId}/messages/${idOf(sent.body)}`,
+      );
+
+      expect(response.status).toBe(204);
+    });
+
+    it("gives 403 when a plain member tries to delete another's message", async () => {
+      const { channelId, member, owner } = await seed();
+      const sent = await owner
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'owner msg' });
+      const messageId = idOf(sent.body);
+
+      const response = await member.delete(
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it('gives 404 when the message belongs to a different channel', async () => {
+      const { channelId, siblingId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'here' });
+      const messageId = idOf(sent.body);
+
+      const response = await member.delete(
+        `/channels/${siblingId}/messages/${messageId}`,
+      );
+
+      expect(response.status).toBe(404);
+    });
+
+    it('is idempotent — deleting twice returns 204 both times', async () => {
+      const { channelId, member } = await seed();
+      const sent = await member
+        .post(`/channels/${channelId}/messages`)
+        .send({ content: 'twice' });
+      const messageId = idOf(sent.body);
+
+      const first = await member.delete(
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+      const second = await member.delete(
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+
+      expect(first.status).toBe(204);
+      expect(second.status).toBe(204);
+    });
+
+    it('gives 401 with no session', async () => {
+      const { channelId } = await seed();
+
+      const response = await request(app.getHttpServer()).delete(
+        `/channels/${channelId}/messages/123`,
+      );
+
+      expect(response.status).toBe(401);
+    });
+  });
+
   describe('GET /channels/:channelId/messages', () => {
     /** `count` messages posted straight into the table, oldest first. */
     async function seedHistory(
