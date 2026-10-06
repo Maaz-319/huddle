@@ -29,6 +29,9 @@ export const CHANNEL_OWNER_ID = 320000000000000001n;
 /** A channel id no row holds — for the "not found" cases. */
 const NO_SUCH_CHANNEL = 999000000000000003n;
 
+/** A server id no row holds — for the bulk read's empty-answer case. */
+const NO_SUCH_SERVER = 999000000000000004n;
+
 /**
  * Both ports, because a `Channel` cannot exist on its own: `Channel.serverId`
  * is a real foreign key, so every case here needs a server to hang one off.
@@ -193,6 +196,86 @@ export function describeChannelRepositoryContract(
         const serverId = await seedServer();
 
         await expect(channels.findByServerId(serverId)).resolves.toEqual([]);
+      });
+    });
+
+    describe('findByServerIds', () => {
+      it('returns channels across several servers at once, private included', async () => {
+        const mine = await seedServer(HUDDLE_HQ);
+        const theirs = await seedServer(SIDE_PROJECT);
+        await channels.create({
+          serverId: mine,
+          name: 'general',
+          isPrivate: false,
+        });
+        await channels.create({
+          serverId: mine,
+          name: 'mods',
+          isPrivate: true,
+        });
+        await channels.create({
+          serverId: theirs,
+          name: 'their-general',
+          isPrivate: false,
+        });
+
+        const found = await channels.findByServerIds([mine, theirs]);
+
+        expect(found.map((channel) => channel.name).sort()).toEqual([
+          'general',
+          'mods',
+          'their-general',
+        ]);
+      });
+
+      it('excludes channels of servers not named', async () => {
+        const mine = await seedServer(HUDDLE_HQ);
+        const theirs = await seedServer(SIDE_PROJECT);
+        await channels.create({
+          serverId: theirs,
+          name: 'their-general',
+          isPrivate: false,
+        });
+
+        await expect(channels.findByServerIds([mine])).resolves.toEqual([]);
+      });
+
+      it('returns channels oldest first, by id', async () => {
+        const mine = await seedServer(HUDDLE_HQ);
+        const first = await channels.create({
+          serverId: mine,
+          name: 'first',
+          isPrivate: false,
+        });
+        const second = await channels.create({
+          serverId: mine,
+          name: 'second',
+          isPrivate: false,
+        });
+
+        const found = await channels.findByServerIds([mine]);
+
+        expect(found.map((channel) => channel.id)).toEqual([
+          first.id,
+          second.id,
+        ]);
+      });
+
+      it('answers an empty serverIds with an empty array', async () => {
+        const mine = await seedServer(HUDDLE_HQ);
+        await channels.create({
+          serverId: mine,
+          name: 'general',
+          isPrivate: false,
+        });
+
+        await expect(channels.findByServerIds([])).resolves.toEqual([]);
+      });
+
+      it('answers ids no server holds with an empty array', async () => {
+        await expect(
+          channels.findByServerIds([NO_SUCH_SERVER]),
+        ).resolves.toEqual([]);
       });
     });
 

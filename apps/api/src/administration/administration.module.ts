@@ -76,6 +76,7 @@ import { ServerRepository } from './server-repository.interface';
     ChannelRepository,
     ChannelMemberRepository,
     ChannelOverrideRepository,
+    AdministrationService,
     RequireRoleGuard,
   ],
 })

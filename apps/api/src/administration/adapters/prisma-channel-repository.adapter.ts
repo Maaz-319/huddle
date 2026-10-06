@@ -65,6 +65,18 @@ export class PrismaChannelRepository extends ChannelRepository {
     return rows.map(toChannel);
   }
 
+  async findByServerIds(serverIds: bigint[]): Promise<Channel[]> {
+    // An empty `in` list would be a syntax error rather than an empty answer.
+    if (serverIds.length === 0) return [];
+
+    const rows = await this.prisma.channel.findMany({
+      where: { serverId: { in: serverIds } },
+      orderBy: { id: 'asc' },
+    });
+
+    return rows.map(toChannel);
+  }
+
   async update(id: bigint, patch: UpdateChannelInput): Promise<Channel> {
     try {
       const row = await this.prisma.channel.update({

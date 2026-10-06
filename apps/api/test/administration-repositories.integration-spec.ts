@@ -551,4 +551,142 @@ describe('the administration Prisma adapters', () => {
       );
     });
   });
+
+  /**
+   * `listAccessibleChannels`' read count, against real Postgres — the #64 AC
+   * "a bounded number of queries regardless of how many servers and
+   * channels", asserted the same way the channel listing's bound is above:
+   * `jest.spyOn` on the adapter instances, real SQL throughout, each bulk
+   * call one statement in these adapters.
+   *
+   * The shape under test is per-*user* rather than per-server: three servers
+   * of channels must still be two reads before the channel-scoped pair, and
+   * never one `findByServerId` per server.
+   */
+  describe('the accessible listing does a bounded number of reads', () => {
+    const ACCESS_OWNER_ID = 810000000000000011n;
+    const ACCESS_USER_ID = 810000000000000012n;
+
+    let service: AdministrationService;
+
+    beforeEach(async () => {
+      await truncateAll(prisma);
+      await prisma.user.createMany({
+        data: [userFixture(ACCESS_OWNER_ID), userFixture(ACCESS_USER_ID)],
+      });
+      service = new AdministrationService(
+        servers,
+        memberships,
+        invites,
+        channels,
+        channelMembers,
+        channelOverrides,
+      );
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    /**
+     * `serverCount` servers, `channelsPerServer` channels each. ACCESS_OWNER
+     * owns them all; ACCESS_USER is an ordinary member of every one — so the
+     * member path (all four reads) and the owner path (channel-scoped pair
+     * skipped) are both reachable.
+     */
+    async function seedWorld(
+      serverCount: number,
+      channelsPerServer: number,
+    ): Promise<void> {
+      for (let index = 0; index < serverCount; index += 1) {
+        const serverId = 810000000000000100n + BigInt(index);
+        await prisma.server.create({ data: serverFixture(serverId) });
+        await prisma.membership.createMany({
+          data: [
+            { serverId, userId: ACCESS_OWNER_ID, role: 'owner' },
+            { serverId, userId: ACCESS_USER_ID, role: 'member' },
+          ],
+        });
+        for (let channel = 0; channel < channelsPerServer; channel += 1) {
+          await channels.create({
+            serverId,
+            name: `channel-${channel}`,
+            isPrivate: channel % 3 === 0,
+          });
+        }
+      }
+    }
+
+    function countReads() {
+      return {
+        membershipsForUser: jest.spyOn(memberships, 'findByUserId'),
+        byServerIds: jest.spyOn(channels, 'findByServerIds'),
+        byServerId: jest.spyOn(channels, 'findByServerId'),
+        bulkMembers: jest.spyOn(channelMembers, 'findChannelIdsForUser'),
+        bulkOverrides: jest.spyOn(channelOverrides, 'findByChannelIds'),
+        perChannelMember: jest.spyOn(channelMembers, 'isMember'),
+        perChannelOverride: jest.spyOn(channelOverrides, 'findByChannelId'),
+      };
+    }
+
+    it.each([
+      [1, 5],
+      [20, 5],
+    ])(
+      'reads four times over %i servers of %i channels',
+      async (serverCount, channelsPerServer) => {
+        await seedWorld(serverCount, channelsPerServer);
+        const reads = countReads();
+
+        await service.listAccessibleChannels(ACCESS_USER_ID);
+
+        expect(reads.membershipsForUser).toHaveBeenCalledTimes(1);
+        expect(reads.byServerIds).toHaveBeenCalledTimes(1);
+        // One query per server is the N+1 this method exists to avoid.
+        expect(reads.byServerId).not.toHaveBeenCalled();
+        expect(reads.bulkMembers).toHaveBeenCalledTimes(1);
+        expect(reads.bulkOverrides).toHaveBeenCalledTimes(1);
+        expect(reads.perChannelMember).not.toHaveBeenCalled();
+        expect(reads.perChannelOverride).not.toHaveBeenCalled();
+      },
+    );
+
+    it('makes no channel-scoped read when the caller owns every server', async () => {
+      await seedWorld(3, 5);
+      const reads = countReads();
+
+      await service.listAccessibleChannels(ACCESS_OWNER_ID);
+
+      expect(reads.membershipsForUser).toHaveBeenCalledTimes(1);
+      expect(reads.byServerIds).toHaveBeenCalledTimes(1);
+      expect(reads.bulkMembers).not.toHaveBeenCalled();
+      expect(reads.bulkOverrides).not.toHaveBeenCalled();
+    });
+
+    it('still filters correctly across three servers', async () => {
+      await seedWorld(3, 7);
+      // Revoke `view` on public channel-1 of the first server; the private
+      // channels (indices 0/3/6 of every server) are already hidden, since
+      // the caller holds no ChannelMember rows.
+      const first = 810000000000000100n;
+      const gated = await prisma.channel.findFirstOrThrow({
+        where: { serverId: first, name: 'channel-1' },
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const listed = await service.listAccessibleChannels(ACCESS_USER_ID);
+
+      // 21 channels seeded; per server the three private ones are hidden,
+      // and the first server also loses channel-1 — eleven visible. Asserted
+      // by name in the first server so a wrong answer of the right size fails.
+      expect(listed).toHaveLength(11);
+      expect(listed.map((channel) => channel.name)).not.toContain('channel-0');
+      expect(
+        listed
+          .filter((channel) => channel.serverId === first)
+          .map((channel) => channel.name)
+          .sort(),
+      ).toEqual(['channel-2', 'channel-4', 'channel-5'].sort());
+    });
+  });
 });
