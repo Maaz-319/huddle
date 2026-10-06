@@ -11,9 +11,18 @@ import { EnvironmentVariables } from '../common/env.validation';
 import { resolveClientIp } from '../common/trust-proxy';
 import { RateLimiterService } from '../rate-limiter/rate-limiter.service';
 
-/** What the handshake puts on every socket — identity, from the handshake only. */
+/** What the handshake puts on every socket — identity and address, from the handshake only. */
 export interface SocketIdentity {
   user: User;
+
+  /**
+   * The client's address as `req.ip` would resolve it (same `trust proxy`
+   * rule, same `proxyaddr` call — `resolveClientIp`). Captured once, here,
+   * so every per-frame limit keys its bucket on exactly the address the
+   * handshake's own `ws-connect` bucket used, and a frame handler never has
+   * to re-derive it from the raw upgrade request.
+   */
+  ip: string;
 }
 
 /**
@@ -120,11 +129,13 @@ export class ChatIoAdapter extends IoAdapter {
     hops: number,
   ): Promise<void> {
     try {
-      const decision = await rateLimiter.consume('ws-connect', {
-        ip: resolveClientIp(socket.request, hops),
-      });
+      const ip = resolveClientIp(socket.request, hops);
+      const decision = await rateLimiter.consume('ws-connect', { ip });
 
       if (decision.allowed) {
+        // Captured even on the frames that pass, because per-frame budgets
+        // read it from here (see SocketIdentity.ip).
+        socket.data.ip = ip;
         next();
         return;
       }

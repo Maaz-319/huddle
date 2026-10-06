@@ -19,60 +19,14 @@ import { CursorPaginationDto } from '../common/pagination.dto';
 import { ParseSnowflakePipe } from '../common/parse-snowflake.pipe';
 import { SnowflakeService } from '../common/snowflake.service';
 import { RateLimit } from '../rate-limiter/rate-limit.decorator';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
-import type { Message } from './message-repository.interface';
+import {
+  MessageResponse,
+  MessagePageResponse,
+  toMessageResponse,
+} from './message-response';
 import { SendMessageDto } from './send-message.dto';
-
-/**
- * The shape every message route returns — a `Message`, ids serialised per
- * AGENTS.md section 4.
- *
- * `createdAt` is present despite there being no such column: it is decoded
- * from the Snowflake id (docs/architecture/data-model.md section 3), so the
- * absence of the column is invisible to a client.
- *
- * `content` is nullable here while `Message.content` is not. A soft-deleted
- * message is still returned — history renders a "message deleted" placeholder
- * in its place (PRD FR-18/FR-19) — but its text never is.
- */
-export interface MessageResponse {
-  id: string;
-  channelId: string;
-  authorId: string;
-  content: string | null;
-  createdAt: string;
-  editedAt: string | null;
-  isDeleted: boolean;
-}
-
-/**
- * Exported for the same reason `toChannelResponse` is: #61's history route
- * returns arrays of this shape, and two copies of a response mapper is how
- * they drift.
- */
-export function toMessageResponse(
-  message: Message,
-  snowflakes: SnowflakeService,
-): MessageResponse {
-  return {
-    id: message.id.toString(),
-    channelId: message.channelId.toString(),
-    authorId: message.authorId.toString(),
-    // Nulled rather than merely relied upon to be blank. #63 blanks the
-    // stored value at delete time; this makes the response correct whether or
-    // not that has happened, and keeps it correct for rows written before it.
-    content: message.isDeleted ? null : message.content,
-    createdAt: snowflakes.timestampFrom(message.id).toISOString(),
-    editedAt: message.editedAt === null ? null : message.editedAt.toISOString(),
-    isDeleted: message.isDeleted,
-  };
-}
-
-/** One page of history, as the history route returns it. */
-export interface MessagePageResponse {
-  messages: MessageResponse[];
-  hasMore: boolean;
-}
 
 /** The message routes for one channel. */
 @Controller('channels/:channelId/messages')
@@ -81,6 +35,7 @@ export class MessageController {
   constructor(
     private readonly chat: ChatService,
     private readonly snowflakes: SnowflakeService,
+    private readonly gateway: ChatGateway,
   ) {}
 
   /**
@@ -96,6 +51,11 @@ export class MessageController {
    * `message-send` is the first channel-dimensioned policy applied to a REST
    * route, so one channel's burst cannot exhaust another's budget — see
    * `RateLimitGuard` for where the channel id comes from.
+   *
+   * The response doubles as the `message_create` broadcast: the gateway is
+   * the one thing that knows rooms exist, so this hands it the already-shaped
+   * payload rather than emitting here or re-deriving it there (#65 — one
+   * write path, one emit site).
    */
   @Post()
   @UseGuards(RequireCapabilityGuard)
@@ -106,13 +66,16 @@ export class MessageController {
     @Body() dto: SendMessageDto,
     @CurrentUser() user: User,
   ): Promise<MessageResponse> {
-    const message = await this.chat.sendMessage(
+    const message = await this.chat.postMessage(
       channelId,
       user.id,
       dto.content,
     );
+    const response = toMessageResponse(message, this.snowflakes);
 
-    return toMessageResponse(message, this.snowflakes);
+    this.gateway.broadcast(channelId, response);
+
+    return response;
   }
 
   /**
