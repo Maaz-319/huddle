@@ -30,8 +30,12 @@ import { UserRepository } from './user-repository.interface';
     AuthService,
     GithubStrategy,
     SessionAuthGuard,
+    // In providers as well as middleware so the socket.io handshake adapter
+    // (#64) can resolve the one instance whose handler REST routes run —
+    // registering it twice would mean two copies of the session config.
+    SessionMiddleware,
   ],
-  exports: [UserRepository, SessionAuthGuard],
+  exports: [UserRepository, SessionAuthGuard, SessionMiddleware],
 })
 export class AuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
