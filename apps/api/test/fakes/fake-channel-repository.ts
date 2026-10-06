@@ -54,6 +54,18 @@ export class FakeChannelRepository extends ChannelRepository {
     return Promise.resolve(channels);
   }
 
+  findByServerIds(serverIds: bigint[]): Promise<Channel[]> {
+    const wanted = new Set(serverIds);
+    const channels = [...this.store.channels.values()]
+      .filter((channel) => wanted.has(channel.serverId))
+      .map((channel) => ({ ...channel }))
+      // The adapter orders by `id asc`; the fake sorts to hold the same
+      // contract rather than inheriting Map insertion order.
+      .sort((a, b) => (a.id === b.id ? 0 : a.id < b.id ? -1 : 1));
+
+    return Promise.resolve(channels);
+  }
+
   update(id: bigint, patch: UpdateChannelInput): Promise<Channel> {
     const existing = this.store.channels.get(id);
 

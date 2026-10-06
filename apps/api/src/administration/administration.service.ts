@@ -32,6 +32,7 @@ import { Invite, InviteRepository } from './invite-repository.interface';
 import {
   Membership,
   MembershipRepository,
+  Role,
 } from './membership-repository.interface';
 import {
   Server,
@@ -489,6 +490,99 @@ export class AdministrationService {
           'view',
         ).allowed,
     );
+  }
+
+  /**
+   * Every channel this user can see, across **all** of their servers — the
+   * set the WebSocket gateway joins a socket to on connect (#64). It is the
+   * per-*user* twin of `listChannels`, which answers per-*server* for the
+   * channel list UI; nothing else needs the cross-server form.
+   *
+   * Built in bulk — four reads however many servers and channels exist —
+   * because this runs on every (re)connect and a user in 20 servers must not
+   * cost 60 queries:
+   *
+   * 1. the user's memberships (`MembershipRepository.findByUserId`),
+   * 2. every channel in those servers (`ChannelRepository.findByServerIds`),
+   * 3. the user's `ChannelMember` rows across those channels,
+   * 4. the `ChannelOverride` rows across those channels,
+   *
+   * then one in-memory pass with `resolveCapability(..., 'view')` — the same
+   * function the guard and `listChannels` use, so the rules live in exactly
+   * one place. `administration-repositories.integration-spec.ts` asserts the
+   * read count does not grow with servers or channels.
+   *
+   * The owner short-circuits per server, exactly as `listChannels` does: a
+   * server the user owns contributes all of its channels with no
+   * channel-scoped lookup, and if every server is owned neither
+   * channel-scoped table is read at all. The membership set is recomputed
+   * fresh on each call — the gateway never caches it across reconnects, which
+   * is half of how live permission changes stay correct (chat-service.md
+   * section 2).
+   */
+  async listAccessibleChannels(userId: bigint): Promise<Channel[]> {
+    const memberships = await this.memberships.findByUserId(userId);
+
+    if (memberships.length === 0) return [];
+
+    const channels = await this.channels.findByServerIds(
+      memberships.map((membership) => membership.serverId),
+    );
+
+    if (channels.length === 0) return [];
+
+    const roleByServer = new Map<bigint, Role>();
+    const ownedServers = new Set<bigint>();
+    for (const membership of memberships) {
+      roleByServer.set(membership.serverId, membership.role);
+      if (membership.role === 'owner') ownedServers.add(membership.serverId);
+    }
+
+    const resolvesNothing = channels.every((channel) =>
+      ownedServers.has(channel.serverId),
+    );
+    if (resolvesNothing) return channels;
+
+    const channelIds = channels.map((channel) => channel.id);
+    const [memberOf, overrides] = await Promise.all([
+      this.channelMembers.findChannelIdsForUser(channelIds, userId),
+      this.channelOverrides.findByChannelIds(channelIds),
+    ]);
+
+    // Grouped once rather than searched per channel, so the in-memory pass
+    // stays linear in the number of channels rather than quadratic — same
+    // shape as `listChannels`.
+    const byChannel = new Map<bigint, ChannelOverride[]>();
+    for (const override of overrides) {
+      const existing = byChannel.get(override.channelId);
+      if (existing === undefined) {
+        byChannel.set(override.channelId, [override]);
+      } else {
+        existing.push(override);
+      }
+    }
+
+    return channels.filter((channel) => {
+      // The owner bypass is a rule, not an optimisation: authority is a
+      // server-level fact a channel override can never touch (PRD section 5).
+      if (ownedServers.has(channel.serverId)) return true;
+
+      const role = roleByServer.get(channel.serverId);
+      // Unreachable: every channel came from `findByServerIds` over exactly
+      // these memberships' servers, and one membership per (server, user) is
+      // unique.
+      if (role === undefined) return false;
+
+      return resolveCapability(
+        {
+          role,
+          isPrivate: channel.isPrivate,
+          isChannelMember: memberOf.has(channel.id),
+          overrides: byChannel.get(channel.id) ?? [],
+        },
+        'view',
+      ).allowed;
+    });
   }
 
   /**

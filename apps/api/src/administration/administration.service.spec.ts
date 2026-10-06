@@ -581,6 +581,171 @@ describe('AdministrationService', () => {
     });
   });
 
+  describe('listAccessibleChannels', () => {
+    /** A server owned by OWNER_ID, optionally seating OTHER_USER_ID in `role`. */
+    async function seedOwned(name: string, role?: Role): Promise<bigint> {
+      const { server } = await servers.createWithOwner(
+        {
+          name,
+          iconUrl: null,
+          channelCreationPolicy: 'everyone',
+          memberInviteToggle: true,
+        },
+        OWNER_ID,
+      );
+
+      if (role !== undefined) {
+        await memberships.create({
+          serverId: server.id,
+          userId: OTHER_USER_ID,
+          role,
+        });
+      }
+
+      return server.id;
+    }
+
+    it('returns visible channels from every server the user is in', async () => {
+      const hq = await seedOwned('Huddle HQ', 'member');
+      const side = await seedOwned('Side Project', 'moderator');
+      await channels.create({
+        serverId: hq,
+        name: 'general',
+        isPrivate: false,
+      });
+      await channels.create({
+        serverId: side,
+        name: 'side-general',
+        isPrivate: false,
+      });
+
+      const listed = await service.listAccessibleChannels(OTHER_USER_ID);
+
+      expect(listed.map((channel) => channel.name).sort()).toEqual([
+        'general',
+        'side-general',
+      ]);
+    });
+
+    it('returns an empty array for a user in no servers', async () => {
+      await expect(
+        service.listAccessibleChannels(300000000000000999n),
+      ).resolves.toEqual([]);
+    });
+
+    it('excludes channels from a server the user is not in', async () => {
+      const joined = await seedOwned('Huddle HQ', 'member');
+      const foreign = await seedOwned('Secret Club');
+      await channels.create({
+        serverId: joined,
+        name: 'general',
+        isPrivate: false,
+      });
+      await channels.create({
+        serverId: foreign,
+        name: 'lounge',
+        isPrivate: false,
+      });
+
+      const listed = await service.listAccessibleChannels(OTHER_USER_ID);
+
+      expect(listed.map((channel) => channel.name)).toEqual(['general']);
+    });
+
+    it('includes a private channel they belong to and excludes one they do not', async () => {
+      const serverId = await seedOwned('Huddle HQ', 'member');
+      const theirs = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+      await channels.create({ serverId, name: 'staff', isPrivate: true });
+      await channelMembers.add(theirs.id, OTHER_USER_ID);
+
+      const listed = await service.listAccessibleChannels(OTHER_USER_ID);
+
+      // The AC's exact pair, across the cross-server form: one private
+      // channel joined, one not, no leakage of the unjoined one's name.
+      expect(listed.map((channel) => channel.name)).toEqual(['mods']);
+    });
+
+    it('hides a public channel whose view an override revoked', async () => {
+      const serverId = await seedOwned('Huddle HQ', 'member');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const gated = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(gated.id, 'member', 'view');
+
+      const listed = await service.listAccessibleChannels(OTHER_USER_ID);
+
+      expect(listed.map((channel) => channel.name)).toEqual(['general']);
+    });
+
+    it('shows the owner every channel, private ones included, with no ChannelMember rows', async () => {
+      const serverId = await seedOwned('Huddle HQ');
+      await channels.create({ serverId, name: 'general', isPrivate: false });
+      const mods = await channels.create({
+        serverId,
+        name: 'mods',
+        isPrivate: true,
+      });
+
+      const listed = await service.listAccessibleChannels(OWNER_ID);
+
+      expect(listed.map((channel) => channel.name).sort()).toEqual([
+        'general',
+        'mods',
+      ]);
+      await expect(channelMembers.findByChannelId(mods.id)).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('makes no channel-scoped read when the user owns every server', async () => {
+      await seedOwned('Huddle HQ');
+      await seedOwned('Side Project');
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
+
+      await service.listAccessibleChannels(OWNER_ID);
+
+      expect(bulkMembers).not.toHaveBeenCalled();
+      expect(bulkOverrides).not.toHaveBeenCalled();
+    });
+
+    it('reads a bounded number of times however many servers and channels there are', async () => {
+      // Three servers, six channels each — eighteen channels total. A
+      // per-server or per-channel read would show up as 3+ and 18+ below.
+      const names = ['Huddle HQ', 'Side Project', 'Third Place'];
+      for (const name of names) {
+        const serverId = await seedOwned(name, 'member');
+        for (let index = 0; index < 6; index += 1) {
+          await channels.create({
+            serverId,
+            name: `channel-${index}`,
+            isPrivate: index % 2 === 0,
+          });
+        }
+      }
+      const membershipsRead = jest.spyOn(memberships, 'findByUserId');
+      const serversRead = jest.spyOn(channels, 'findByServerIds');
+      const perServerRead = jest.spyOn(channels, 'findByServerId');
+      const bulkMembers = jest.spyOn(channelMembers, 'findChannelIdsForUser');
+      const bulkOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
+
+      await service.listAccessibleChannels(OTHER_USER_ID);
+
+      expect(membershipsRead).toHaveBeenCalledTimes(1);
+      expect(serversRead).toHaveBeenCalledTimes(1);
+      expect(perServerRead).not.toHaveBeenCalled();
+      expect(bulkMembers).toHaveBeenCalledTimes(1);
+      expect(bulkOverrides).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('createChannel', () => {
     it('creates a channel without seating anyone in it', async () => {
       const { server } = await servers.createWithOwner(

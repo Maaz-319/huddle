@@ -1,6 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import connectRedis from 'connect-redis';
+import type { IncomingMessage } from 'http';
 import { NextFunction, Request, Response } from 'express';
 import session from 'express-session';
 import { EnvironmentVariables, NodeEnv } from '../common/env.validation';
@@ -61,5 +62,52 @@ export class SessionMiddleware implements NestMiddleware {
 
   use(req: Request, res: Response, next: NextFunction): void {
     this.handler(req, res, next);
+  }
+
+  /**
+   * Runs the very same handler over a WebSocket handshake (#64) and returns
+   * the session's user id — `undefined` when there is no session, an expired
+   * one, or an id Redis no longer holds.
+   *
+   * This is the "cookie parsed by exactly the code path REST uses" half of
+   * the shared handshake; the "who counts as logged in" half is
+   * `resolveSessionUser`, which the socket middleware calls on the result.
+   *
+   * The handshake has an `IncomingMessage` but no HTTP response of its own.
+   * Two casts live here, both at the express-session boundary:
+   *
+   * - the request: the handler reads only `headers`, `url` and `secret` off
+   *   it — all present on the raw `IncomingMessage` — before it sets
+   *   `session`/`sessionID` on it, the same object it would have mutated had
+   *   Express built it;
+   * - the response: a no-op surface, because express-session only *assigns*
+   *   `writeHead`/`end`/`write` onto it during setup (`on-headers` and its
+   *   save-on-end proxy) and never *calls* them — a handshake writes no
+   *   response and issues no cookie back. If express-session ever starts
+   *   reading the response during setup, this method must grow with it.
+   */
+  async handshakeUserId(req: IncomingMessage): Promise<string | undefined> {
+    const expressReq = req as unknown as Request;
+    const res = {
+      getHeader: () => undefined,
+      setHeader: () => undefined,
+      removeHeader: () => undefined,
+    } as unknown as Response;
+
+    await new Promise<void>((resolve, reject) => {
+      this.handler(expressReq, res, (error?: unknown) => {
+        if (error === undefined) resolve();
+        // A Promise rejection must carry an Error. express-session's `next`
+        // is untyped at the error slot; a non-Error reason gets a fixed
+        // message rather than a stringification that could say
+        // `[object Object]` (no-base-to-string).
+        else if (error instanceof Error) reject(error);
+        else reject(new Error(`Session setup failed (${typeof error})`));
+      });
+    });
+
+    // The handler set `session` before calling next without an error; a
+    // rejected promise above means it never got that far.
+    return expressReq.session.userId;
   }
 }

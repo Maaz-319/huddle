@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Request } from 'express';
-import { UnauthorizedError } from '../common/errors';
+import { resolveSessionUser } from './resolve-session-user';
 import { UserRepository } from './user-repository.interface';
 
 /**
@@ -15,12 +15,14 @@ import { UserRepository } from './user-repository.interface';
  * `session.d.ts`), so `@CurrentUser()` and everything downstream has one
  * place to read the caller from regardless of how they got there.
  *
- * Rejects with `UnauthorizedError` (401) whenever the caller cannot be
- * resolved: no session, a session naming a user that no longer exists, or a
- * user whose `deletedAt` is set. That last case is how account deletion
- * invalidates every other live session for the user (#33) — there is no
- * session index to walk, this guard just refuses to resolve a deleted user
- * the next time any of their sessions is used.
+ * The resolution itself lives in `resolveSessionUser`, shared with the
+ * socket.io handshake middleware (#64) so REST and the WebSocket agree on
+ * who is logged in. It rejects with `UnauthorizedError` (401) whenever the
+ * caller cannot be resolved: no session, a session naming a user that no
+ * longer exists, or a user whose `deletedAt` is set. That last case is how
+ * account deletion invalidates every other live session for the user (#33) —
+ * there is no session index to walk, this guard just refuses to resolve a
+ * deleted user the next time any of their sessions is used.
  */
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -28,23 +30,8 @@ export class SessionAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
-    const userId = request.session.userId;
 
-    if (userId === undefined) {
-      throw new UnauthorizedError('Not logged in');
-    }
-
-    const user = await this.users.findById(BigInt(userId));
-
-    if (user === null) {
-      throw new UnauthorizedError('Session does not name a real user');
-    }
-
-    if (user.deletedAt !== null) {
-      throw new UnauthorizedError('This account has been deleted');
-    }
-
-    request.user = user;
+    request.user = await resolveSessionUser(this.users, request.session.userId);
 
     return true;
   }

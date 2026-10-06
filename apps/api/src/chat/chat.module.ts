@@ -3,6 +3,7 @@ import { AdministrationModule } from '../administration/administration.module';
 import { AuthModule } from '../auth/auth.module';
 import { RequireCapabilityGuard } from '../auth/require-capability.guard';
 import { PrismaMessageRepository } from './adapters/prisma-message-repository.adapter';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { MessageController } from './message.controller';
 import { MessageRepository } from './message-repository.interface';
@@ -33,6 +34,10 @@ import { MessageRepository } from './message-repository.interface';
   providers: [
     { provide: MessageRepository, useClass: PrismaMessageRepository },
     ChatService,
+    // The socket.io gateway, registered as a provider so Nest instantiates
+    // it and its `handleConnection` runs on connect (#64). It injects
+    // `AdministrationService` from `AdministrationModule` above.
+    ChatGateway,
     RequireCapabilityGuard,
   ],
   exports: [MessageRepository, ChatService],
