@@ -5,6 +5,7 @@ import {
   SEND_RETENTION_MS,
   SendResult,
   TYPING_DEBOUNCE_MS,
+  VIOLATION_WINDOW_MS,
 } from '../../src/chat/chat-state-store.interface';
 
 interface Filed<Result> {
@@ -23,12 +24,12 @@ interface Filed<Result> {
  * recalling a send can never hand back an edit's result — the same isolation
  * the real adapter gets from its op-namespaced keys.
  *
- * Unlike the rate-limit fake, this one *does* model expiry: the retention
- * and debounce windows are part of the port's contract (the shared suite
- * asserts each), and a fake that remembered forever would make that contract
- * pass while the real adapter expired keys. The clock is `Date.now` at call
- * time — the port's methods take no timestamp, so wall time is the only
- * thing both implementations can be compared on.
+ * Unlike the rate-limit fake, this one *does* model expiry: the retention,
+ * debounce, and escalation windows are part of the port's contract (the
+ * shared suite asserts each), and a fake that remembered forever would make
+ * that contract pass while the real adapter expired keys. The clock is
+ * `Date.now` at call time — the port's methods take no timestamp, so wall
+ * time is the only thing both implementations can be compared on.
  */
 export class FakeChatStateStore extends ChatStateStore {
   private readonly sendEntries = new Map<string, Filed<SendResult>>();
@@ -43,9 +44,20 @@ export class FakeChatStateStore extends ChatStateStore {
    */
   private readonly typingWindows = new Map<string, number>();
 
+  /**
+   * User → `{count, expiresAt}` for the escalation counter. Same lazy
+   * expiry-on-read as the typing flags: a stale entry is treated as absent,
+   * which is how Redis's `PX` behaves for a key it has not swept yet.
+   */
+  private readonly violations = new Map<
+    string,
+    { count: number; expiresAt: number }
+  >();
+
   constructor(
     public ttlMs: number = SEND_RETENTION_MS,
     public debounceMs: number = TYPING_DEBOUNCE_MS,
+    public violationWindowMs: number = VIOLATION_WINDOW_MS,
   ) {
     super();
   }
@@ -92,6 +104,27 @@ export class FakeChatStateStore extends ChatStateStore {
 
     this.typingWindows.set(field, now);
     return Promise.resolve(true);
+  }
+
+  recordViolation(userId: bigint): Promise<number> {
+    const field = userId.toString();
+    const now = Date.now();
+    const existing = this.violations.get(field);
+
+    // Fixed window: only the first violation sets the deadline, later ones
+    // add to the count without extending it — the port's contract, and the
+    // difference between "hammering keeps me going forever" and "quiet for
+    // sixty seconds or it starts over".
+    if (existing === undefined || existing.expiresAt <= now) {
+      this.violations.set(field, {
+        count: 1,
+        expiresAt: now + this.violationWindowMs,
+      });
+      return Promise.resolve(1);
+    }
+
+    existing.count += 1;
+    return Promise.resolve(existing.count);
   }
 
   private file<Result>(

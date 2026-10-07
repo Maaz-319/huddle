@@ -5,11 +5,13 @@ import {
   ChatStateStore,
   SEND_RETENTION_MS,
   TYPING_DEBOUNCE_MS,
+  VIOLATION_WINDOW_MS,
 } from '../src/chat/chat-state-store.interface';
 import { RedisService } from '../src/common/redis.service';
 import {
   CHAT_STATE_CONTRACT_KEY_PREFIX,
   CHAT_STATE_CONTRACT_TYPING_PATTERN,
+  CHAT_STATE_CONTRACT_VIOLATIONS_PATTERN,
   describeChatStateStoreContract,
 } from './fakes/chat-state-store.contract';
 
@@ -23,7 +25,13 @@ const REDIS_URL = process.env['REDIS_URL'] ?? 'redis://localhost:6379';
 /** The send scheme; the direct-write cases below compose keys inside it. */
 const SEND_PREFIX = 'huddle:chat:send:';
 
-/** Every scheme this file writes, one per operation the port now has. */
+/**
+ * Every nonce-bearing scheme this file writes, one per op that composes keys
+ * with a `:<nonce>` segment. The violation counter has no nonce (it is keyed
+ * by user alone) and so is swept by `CHAT_STATE_CONTRACT_VIOLATIONS_PATTERN`
+ * instead — its `99*` user glob also covers the hand-picked ids the
+ * real-Redis cases below use.
+ */
 const PREFIXES = [
   'huddle:chat:send:',
   'huddle:chat:edit:',
@@ -61,16 +69,20 @@ describe('RedisChatStateStore', () => {
     // Scoped to exactly what this file writes — contract keys are told apart
     // by the contract's prefix sitting inside the adapter's `:<key>` segment
     // — so a development idempotency key is never swept up, and
-    // `npm run test:integration` passes twice in a row. Typing flags have no
-    // prefixed nonce to hang off, so they match on the contract's `99*` user
-    // floor instead (CHAT_STATE_CONTRACT_TYPING_PATTERN).
+    // `npm run test:integration` passes twice in a row. Typing flags and
+    // violation counters have no prefixed nonce to hang off, so they match on
+    // the contract's `99*` user floor instead
+    // (CHAT_STATE_CONTRACT_TYPING_PATTERN, CHAT_STATE_CONTRACT_VIOLATIONS_PATTERN).
     const contractKeys = await redis.keys(CONTRACT_PATTERN);
     const typingKeys = await redis.keys(CHAT_STATE_CONTRACT_TYPING_PATTERN);
+    const violationKeys = await redis.keys(
+      CHAT_STATE_CONTRACT_VIOLATIONS_PATTERN,
+    );
     const ownKeys: string[] = [];
     for (const prefix of PREFIXES) {
       ownKeys.push(...(await redis.keys(`${prefix}*:${prefix}*`)));
     }
-    const all = [...contractKeys, ...typingKeys, ...ownKeys];
+    const all = [...contractKeys, ...typingKeys, ...violationKeys, ...ownKeys];
     if (all.length > 0) await redis.del(...all);
   });
 
@@ -85,8 +97,12 @@ describe('RedisChatStateStore', () => {
     expect(store).toBeInstanceOf(RedisChatStateStore);
   });
 
-  describeChatStateStoreContract('RedisChatStateStore', (ttlMs, debounceMs) =>
-    Promise.resolve(new RedisChatStateStore(redis, ttlMs, debounceMs)),
+  describeChatStateStoreContract(
+    'RedisChatStateStore',
+    (ttlMs, debounceMs, violationWindowMs) =>
+      Promise.resolve(
+        new RedisChatStateStore(redis, ttlMs, debounceMs, violationWindowMs),
+      ),
   );
 
   describe('behaviour that needs real Redis', () => {
@@ -158,6 +174,27 @@ describe('RedisChatStateStore', () => {
       // The NX half against real Redis: the second call loses the same way
       // the contract's drop case says it must.
       await expect(store.markTyping(user, channel)).resolves.toBe(false);
+    });
+
+    it('files the violation counter as one integer key with the default 60s window', async () => {
+      const user = 9_990_005n;
+      const field = `huddle:chat:violations:${user.toString()}`;
+
+      await expect(store.recordViolation(user)).resolves.toBe(1);
+      await expect(redis.type(field)).resolves.toBe('string');
+      await expect(redis.get(field)).resolves.toBe('1');
+
+      // The default window is the port's documented 60 seconds
+      // (VIOLATION_WINDOW_MS) — asserted against real Redis because that is
+      // where a wrong unit (seconds where milliseconds were meant, say)
+      // would silently give every flood 60x its intended runway.
+      const ttl = await redis.pttl(field);
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(VIOLATION_WINDOW_MS);
+      expect(ttl).toBeGreaterThan(VIOLATION_WINDOW_MS - 2_000);
+
+      await expect(store.recordViolation(user)).resolves.toBe(2);
+      await expect(redis.get(field)).resolves.toBe('2');
     });
   });
 });
