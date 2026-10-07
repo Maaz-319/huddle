@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 // The same table `resolveCapability` reads at request time. Imported rather
 // than restated so the write-time no-op check and the read-time rule cannot
 // disagree about what a Member holds -- a plain function and a constant, so
@@ -12,6 +13,12 @@ import {
   NotFoundError,
   ValidationError,
 } from '../common/errors';
+import {
+  SERVER_ACCESS_CHANGED,
+  ServerAccessChanged,
+  USER_ACCESS_CHANGED,
+  UserAccessChanged,
+} from './access-events';
 import {
   ChannelMember,
   ChannelMemberRepository,
@@ -47,8 +54,15 @@ export interface CreateServerRequest {
 }
 
 /**
- * Server/membership/invite orchestration, depending only on the three ports
+ * Server/membership/invite orchestration, depending only on the ports
  * (AGENTS.md section 2) — no Prisma types belong in this file.
+ *
+ * The one non-port dependency is `EventEmitter2`, the in-process bus it
+ * announces access changes on (#69, access-events.ts). It is injected
+ * directly for the same reason socket.io is (repo-structure.md section 4):
+ * plumbing for a single-instance app, not a swappable backing store — and
+ * wrapping it would buy nothing, since the listener side is a decorator
+ * (`@OnEvent`) that takes the raw emitter's events anyway.
  */
 @Injectable()
 export class AdministrationService {
@@ -59,6 +73,7 @@ export class AdministrationService {
     private readonly channels: ChannelRepository,
     private readonly channelMembers: ChannelMemberRepository,
     private readonly channelOverrides: ChannelOverrideRepository,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -244,6 +259,12 @@ export class AdministrationService {
   /** Hard-deletes the server. Same authorization note as `updateServer`. */
   async deleteServer(serverId: bigint): Promise<void> {
     await this.servers.delete(serverId);
+
+    // Every membership row is gone with it (schema cascade), so every
+    // connected member's accessible set just lost this server's channels.
+    this.events.emit(SERVER_ACCESS_CHANGED, {
+      serverId,
+    } satisfies ServerAccessChanged);
   }
 
   /**
@@ -350,7 +371,20 @@ export class AdministrationService {
       );
     }
 
-    return this.memberships.updateRole(serverId, targetUserId, role);
+    const membership = await this.memberships.updateRole(
+      serverId,
+      targetUserId,
+      role,
+    );
+
+    // Case 5 of access-events.ts — and its mirror: a promotion can grant
+    // `view` where an override denies the old role, a demotion can revoke
+    // it. The listener reconciles both directions, so one emit covers both.
+    this.events.emit(USER_ACCESS_CHANGED, {
+      userId: targetUserId,
+    } satisfies UserAccessChanged);
+
+    return membership;
   }
 
   /**
@@ -371,6 +405,15 @@ export class AdministrationService {
     }
 
     await this.memberships.transferOwnership(serverId, fromUserId, toUserId);
+
+    // Beyond issue #69's enumerated list, because it is a silent-leak path:
+    // the old owner loses the owner bypass everywhere at once, including
+    // private channels they were never seated in, and the new owner gains
+    // them. Reconciling the whole connected set is the only reply that
+    // covers both without guessing which channels changed.
+    this.events.emit(SERVER_ACCESS_CHANGED, {
+      serverId,
+    } satisfies ServerAccessChanged);
   }
 
   /**
@@ -606,7 +649,19 @@ export class AdministrationService {
     channelId: bigint,
     patch: UpdateChannelInput,
   ): Promise<Channel> {
-    return this.channels.update(channelId, patch);
+    const channel = await this.channels.update(channelId, patch);
+
+    // Cases 2 of access-events.ts, and its mirror (private → public grants
+    // every server member who was not seated): only a visibility flip moves
+    // anyone's access, so a rename emits nothing.
+    if (patch.isPrivate !== undefined) {
+      this.events.emit(SERVER_ACCESS_CHANGED, {
+        serverId: channel.serverId,
+        channelId,
+      } satisfies ServerAccessChanged);
+    }
+
+    return channel;
   }
 
   /**
@@ -620,7 +675,18 @@ export class AdministrationService {
    * `administration-repositories.integration-spec.ts`.
    */
   async deleteChannel(channelId: bigint): Promise<void> {
+    // Loaded before the delete for the event's serverId; a null would have
+    // failed the delete with the same NotFoundError anyway (channel-
+    // repository.interface), so this changes which call throws, not whether.
+    const channel = await this.getChannel(channelId);
+
     await this.channels.delete(channelId);
+
+    // Case 3 of access-events.ts: the room is gone for every subscriber.
+    this.events.emit(SERVER_ACCESS_CHANGED, {
+      serverId: channel.serverId,
+      channelId,
+    } satisfies ServerAccessChanged);
   }
 
   /**
@@ -683,7 +749,16 @@ export class AdministrationService {
       );
     }
 
-    return this.channelMembers.add(channelId, userId);
+    const member = await this.channelMembers.add(channelId, userId);
+
+    // The grant half of case 1 in access-events.ts: seated mid-session, so
+    // the socket joins the room now instead of at the next reconnect.
+    this.events.emit(USER_ACCESS_CHANGED, {
+      userId,
+      channelId,
+    } satisfies UserAccessChanged);
+
+    return member;
   }
 
   /**
@@ -696,6 +771,13 @@ export class AdministrationService {
    */
   async removeChannelMember(channelId: bigint, userId: bigint): Promise<void> {
     await this.channelMembers.remove(channelId, userId);
+
+    // Case 1 of access-events.ts — emitted after the row is gone, so the
+    // reconcile the listener runs reads the post-revocation state.
+    this.events.emit(USER_ACCESS_CHANGED, {
+      userId,
+      channelId,
+    } satisfies UserAccessChanged);
   }
 
   /**
@@ -731,7 +813,7 @@ export class AdministrationService {
     role: OverrideRole,
     capability: Capability,
   ): Promise<void> {
-    await this.getChannel(channelId);
+    const channel = await this.getChannel(channelId);
 
     if (
       role === 'member' &&
@@ -744,6 +826,15 @@ export class AdministrationService {
     }
 
     await this.channelOverrides.revoke(channelId, role, capability);
+
+    // Case 4 of access-events.ts: every holder of `role` in this server may
+    // have just lost the capability here — which of them actually did
+    // depends on their roles, seats and other overrides, so the listener
+    // recomputes rather than being told the role.
+    this.events.emit(SERVER_ACCESS_CHANGED, {
+      serverId: channel.serverId,
+      channelId,
+    } satisfies ServerAccessChanged);
   }
 
   /**
@@ -765,9 +856,16 @@ export class AdministrationService {
     role: OverrideRole,
     capability: Capability,
   ): Promise<void> {
-    await this.getChannel(channelId);
+    const channel = await this.getChannel(channelId);
 
     await this.channelOverrides.restore(channelId, role, capability);
+
+    // The grant mirror of case 4: a revocation just came off, so some
+    // holders of `role` may have gained the capability back.
+    this.events.emit(SERVER_ACCESS_CHANGED, {
+      serverId: channel.serverId,
+      channelId,
+    } satisfies ServerAccessChanged);
   }
 
   /**

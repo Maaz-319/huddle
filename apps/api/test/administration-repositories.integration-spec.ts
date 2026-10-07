@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaChannelMemberRepository } from '../src/administration/adapters/prisma-channel-member-repository.adapter';
 import { PrismaChannelOverrideRepository } from '../src/administration/adapters/prisma-channel-override-repository.adapter';
@@ -469,6 +470,7 @@ describe('the administration Prisma adapters', () => {
         channels,
         channelMembers,
         channelOverrides,
+        new EventEmitter2(),
       );
     });
 
@@ -581,6 +583,7 @@ describe('the administration Prisma adapters', () => {
         channels,
         channelMembers,
         channelOverrides,
+        new EventEmitter2(),
       );
     });
 
