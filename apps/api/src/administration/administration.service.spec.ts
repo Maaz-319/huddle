@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FakeAdministrationStore } from '../../test/fakes/fake-administration-store';
 import { FakeChannelMemberRepository } from '../../test/fakes/fake-channel-member-repository';
 import { FakeChannelOverrideRepository } from '../../test/fakes/fake-channel-override-repository';
@@ -11,11 +12,27 @@ import {
   NotFoundError,
   ValidationError,
 } from '../common/errors';
+import { SERVER_ACCESS_CHANGED, USER_ACCESS_CHANGED } from './access-events';
 import { AdministrationService } from './administration.service';
 import { Role } from './membership-repository.interface';
 
 const OWNER_ID = 300000000000000001n;
 const OTHER_USER_ID = 300000000000000002n;
+
+/**
+ * An emitter that records instead of dispatching. A real `EventEmitter2`
+ * would work — nothing listens on this instance — but recording makes each
+ * access-events assertion exact: the event name and payload, in order, with
+ * no spy plumbing to clear between actions.
+ */
+class RecordingEmitter extends EventEmitter2 {
+  readonly emitted: { event: string; payload: unknown }[] = [];
+
+  override emit(event: string | symbol, ...values: unknown[]): boolean {
+    this.emitted.push({ event: String(event), payload: values[0] });
+    return true;
+  }
+}
 
 describe('AdministrationService', () => {
   let servers: FakeServerRepository;
@@ -24,6 +41,7 @@ describe('AdministrationService', () => {
   let channels: FakeChannelRepository;
   let channelMembers: FakeChannelMemberRepository;
   let channelOverrides: FakeChannelOverrideRepository;
+  let events: RecordingEmitter;
   let service: AdministrationService;
 
   beforeEach(() => {
@@ -34,6 +52,7 @@ describe('AdministrationService', () => {
     channels = new FakeChannelRepository(store);
     channelMembers = new FakeChannelMemberRepository(store);
     channelOverrides = new FakeChannelOverrideRepository(store);
+    events = new RecordingEmitter();
     service = new AdministrationService(
       servers,
       memberships,
@@ -41,6 +60,7 @@ describe('AdministrationService', () => {
       channels,
       channelMembers,
       channelOverrides,
+      events,
     );
   });
 
@@ -1144,6 +1164,159 @@ describe('AdministrationService', () => {
             : service.restoreCapability(unknown, 'member', 'post');
 
       await expect(call).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  /**
+   * The per-case emit checklist from access-events.ts, asserted here where
+   * each write is cheap to drive. The e2e suite proves the other half —
+   * that a listener acts on these — but a missing emit is invisible to any
+   * behavioural test that happens not to look at the affected socket, so
+   * the enumeration itself is pinned here, one test per case.
+   */
+  describe('access events', () => {
+    async function seedServerWithChannel(
+      isPrivate = false,
+    ): Promise<{ serverId: bigint; channelId: bigint }> {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: isPrivate ? 'mods' : 'general',
+        isPrivate,
+      });
+
+      return { serverId, channelId: channel.id };
+    }
+
+    it('removeChannelMember emits user access changed with the channel', async () => {
+      const { channelId } = await seedServerWithChannel(true);
+
+      await service.removeChannelMember(channelId, OTHER_USER_ID);
+
+      expect(events.emitted).toStrictEqual([
+        {
+          event: USER_ACCESS_CHANGED,
+          payload: { userId: OTHER_USER_ID, channelId },
+        },
+      ]);
+    });
+
+    it('addChannelMember emits the same event — the grant half is not deferred', async () => {
+      const { channelId } = await seedServerWithChannel(true);
+
+      await service.addChannelMember(channelId, OTHER_USER_ID);
+
+      expect(events.emitted).toStrictEqual([
+        {
+          event: USER_ACCESS_CHANGED,
+          payload: { userId: OTHER_USER_ID, channelId },
+        },
+      ]);
+    });
+
+    it('updateMemberRole emits user access changed for the target, in both directions', async () => {
+      const serverId = await seedServer('member');
+
+      await service.updateMemberRole(serverId, OTHER_USER_ID, 'moderator');
+      await service.updateMemberRole(serverId, OTHER_USER_ID, 'member');
+
+      expect(events.emitted).toEqual([
+        { event: USER_ACCESS_CHANGED, payload: { userId: OTHER_USER_ID } },
+        { event: USER_ACCESS_CHANGED, payload: { userId: OTHER_USER_ID } },
+      ]);
+    });
+
+    it('updateChannel emits server access changed on a visibility flip', async () => {
+      const { serverId, channelId } = await seedServerWithChannel(false);
+
+      await service.updateChannel(channelId, { isPrivate: true });
+
+      expect(events.emitted).toStrictEqual([
+        {
+          event: SERVER_ACCESS_CHANGED,
+          payload: { serverId, channelId },
+        },
+      ]);
+    });
+
+    it('updateChannel stays silent on a rename — no access moved', async () => {
+      const { channelId } = await seedServerWithChannel(false);
+
+      await service.updateChannel(channelId, { name: 'renamed' });
+
+      expect(events.emitted).toEqual([]);
+    });
+
+    it('deleteChannel emits server access changed', async () => {
+      const { serverId, channelId } = await seedServerWithChannel(true);
+
+      await service.deleteChannel(channelId);
+
+      expect(events.emitted).toStrictEqual([
+        {
+          event: SERVER_ACCESS_CHANGED,
+          payload: { serverId, channelId },
+        },
+      ]);
+    });
+
+    it('revokeCapability and restoreCapability each emit server access changed', async () => {
+      const { serverId, channelId } = await seedServerWithChannel(false);
+
+      await service.revokeCapability(channelId, 'member', 'view');
+      await service.restoreCapability(channelId, 'member', 'view');
+
+      expect(events.emitted).toEqual([
+        {
+          event: SERVER_ACCESS_CHANGED,
+          payload: { serverId, channelId },
+        },
+        {
+          event: SERVER_ACCESS_CHANGED,
+          payload: { serverId, channelId },
+        },
+      ]);
+    });
+
+    it('revokeCapability refuses a no-op tighten without emitting', async () => {
+      const { channelId } = await seedServerWithChannel(false);
+
+      await expect(
+        service.revokeCapability(channelId, 'member', 'manage_settings'),
+      ).rejects.toBeInstanceOf(ValidationError);
+
+      expect(events.emitted).toEqual([]);
+    });
+
+    it('deleteServer emits server access changed — its members all just lost it', async () => {
+      const serverId = await seedServer('member');
+
+      await service.deleteServer(serverId);
+
+      expect(events.emitted).toStrictEqual([
+        { event: SERVER_ACCESS_CHANGED, payload: { serverId } },
+      ]);
+    });
+
+    it('transferOwnership emits server access changed — the old owner loses the bypass', async () => {
+      const serverId = await seedServer('member');
+
+      await service.transferOwnership(serverId, OWNER_ID, OTHER_USER_ID);
+
+      expect(events.emitted).toStrictEqual([
+        { event: SERVER_ACCESS_CHANGED, payload: { serverId } },
+      ]);
+    });
+
+    it('a channel with no emit-bearing change is silent — createChannel', async () => {
+      const serverId = await seedServer('member');
+
+      await service.createChannel(
+        { serverId, name: 'fresh', isPrivate: false },
+        OWNER_ID,
+      );
+
+      expect(events.emitted).toEqual([]);
     });
   });
 });

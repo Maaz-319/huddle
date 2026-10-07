@@ -25,8 +25,8 @@ An npm workspaces monorepo:
 
 ## Prerequisites
 
-- **Node 22** (see [`.nvmrc`](.nvmrc))
-- **npm** 10 or newer, which ships with Node 22
+- **Node 24** (see [`.nvmrc`](.nvmrc); jest needs 24.9+ to load ESM-only dependencies such as `@nestjs/event-emitter`)
+- **npm** 10 or newer, which ships with Node 24
 - **Docker**, for the local Postgres and Redis
 
 ## Getting started
