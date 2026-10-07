@@ -2,8 +2,9 @@ import type { SnowflakeService } from '../common/snowflake.service';
 import type { Message } from './message-repository.interface';
 
 /**
- * The shape every message route and every `message_create` broadcast
- * carries — a `Message`, ids serialised per AGENTS.md section 4.
+ * The shape every message route and every `message_create` /
+ * `message_update` broadcast carries — a `Message`, ids serialised per
+ * AGENTS.md section 4.
  *
  * `createdAt` is present despite there being no such column: it is decoded
  * from the Snowflake id (docs/architecture/data-model.md section 3), so the
@@ -49,6 +50,21 @@ export function toMessageResponse(
     editedAt: message.editedAt === null ? null : message.editedAt.toISOString(),
     isDeleted: message.isDeleted,
   };
+}
+
+/**
+ * The shape of a `message_delete` broadcast (#66): everything a client needs
+ * to swap the row for its "message deleted" placeholder, and nothing more.
+ *
+ * Two fields, deliberately: the id to find the row by, and the channel —
+ * one socket carries every room the user is in, so a client has no other way
+ * to tell which channel the removal came from. The deleted content is not
+ * here for the same reason it is nulled above: the row is blanked at delete
+ * time (#63), and this payload is built after that write, never before.
+ */
+export interface MessageDeleteResponse {
+  id: string;
+  channelId: string;
 }
 
 /** One page of history, as the history route returns it. */

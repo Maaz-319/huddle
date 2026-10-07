@@ -20,14 +20,15 @@ import type {
 } from './chat.io-adapter';
 import { ChatService } from './chat.service';
 import { ChatStateStore } from './chat-state-store.interface';
-import { MessageResponse, toMessageResponse } from './message-response';
+import { DeleteAck, parseMessageDeleteFrame } from './message-delete.frame';
+import { EditAck, parseMessageEditFrame } from './message-edit.frame';
 import {
-  ackErrorFrom,
-  ackKeyOf,
-  AckError,
-  parseMessageSendFrame,
-  SendAck,
-} from './message-send.frame';
+  MessageDeleteResponse,
+  MessageResponse,
+  toMessageResponse,
+} from './message-response';
+import { parseMessageSendFrame, SendAck } from './message-send.frame';
+import { ackErrorFrom, ackKeyOf, AckError } from './socket-frame';
 
 /**
  * The WebSocket transport: one multiplexed connection per client, no
@@ -35,15 +36,17 @@ import {
  *
  * On every connection the socket joins one room per channel the user may
  * view, across all of their servers — the map every later broadcast fires
- * into. From #65 the gateway also handles `message_send`: validate, spend
- * from the frame budget, resolve `post`, dedupe, write, ack the sender, and
- * broadcast to the room.
+ * into. The three mutation frames then ride that map: `message_send`
+ * (#65), `message_edit` and `message_delete` (#66) each validate, spend
+ * from a frame budget, dedupe, call the same `ChatService` method REST
+ * calls, ack the sender, and broadcast to the room.
  *
  * The gateway stays thin, like a controller — validate, call the service,
  * shape the reply (repo-structure.md section 4; socket.io is the documented
  * exception to the port/adapter rule, not a licence to put logic here). The
- * two things it owns that no service does: the room set (only it knows the
- * sockets exist) and the single emit site `broadcast`.
+ * things it owns that no service does: the room set (only it knows the
+ * sockets exist) and the broadcast trio — the single place each of the three
+ * events from chat-service.md section 3 is emitted.
  */
 @WebSocketGateway()
 export class ChatGateway implements OnGatewayConnection {
@@ -51,7 +54,7 @@ export class ChatGateway implements OnGatewayConnection {
 
   /**
    * The socket.io server Nest binds here once the adapter has created it.
-   * Every broadcast goes out through `broadcast` below — never a direct
+   * Every broadcast goes out through the trio below — never a direct
    * `this.server.to(...)` anywhere else — so "where do rooms fan out" has
    * exactly one answer.
    */
@@ -93,9 +96,10 @@ export class ChatGateway implements OnGatewayConnection {
   }
 
   /**
-   * The one emit site: `message_create` to every socket in the channel's
-   * room, sender included (chat-service.md section 4 — the sender's UI
-   * updates from the direct ack, but its own broadcast is not suppressed).
+   * Emit site one of three: `message_create` to every socket in the
+   * channel's room, sender included (chat-service.md section 4 — the
+   * sender's UI updates from the direct ack, but its own broadcast is not
+   * suppressed).
    *
    * Called from two places — this gateway's own handler after a socket send,
    * and the REST `POST` after the service write — because `ChatService` must
@@ -107,8 +111,34 @@ export class ChatGateway implements OnGatewayConnection {
    * object it is returning, so the Snowflake decoding happens once per
    * message, not twice.
    */
-  broadcast(channelId: bigint, message: MessageResponse): void {
+  broadcastCreate(channelId: bigint, message: MessageResponse): void {
     this.server.to(channelId.toString()).emit('message_create', message);
+  }
+
+  /**
+   * Emit site two of three: `message_update` with the full edited message,
+   * so a client renders the new text and the "(edited)" marker from
+   * `editedAt` without re-fetching (chat-service.md section 3).
+   *
+   * Reached from the gateway's `message_edit` handler and the REST `PATCH`
+   * alike — the controller hands back the very object it returns, same as
+   * create.
+   */
+  broadcastUpdate(channelId: bigint, message: MessageResponse): void {
+    this.server.to(channelId.toString()).emit('message_update', message);
+  }
+
+  /**
+   * Emit site three of three: `message_delete` with the id and channel a
+   * client patches by — never the content (chat-service.md section 3; the
+   * payload type says why).
+   *
+   * Reached from the gateway's `message_delete` handler and the REST
+   * `DELETE`. The controller has both ids on the route already, so it does
+   * not need the service to hand a message back just to build this.
+   */
+  broadcastDelete(channelId: bigint, deletion: MessageDeleteResponse): void {
+    this.server.to(channelId.toString()).emit('message_delete', deletion);
   }
 
   /**
@@ -116,34 +146,16 @@ export class ChatGateway implements OnGatewayConnection {
    * ack through socket.io's emit acknowledgement — separate from the room
    * broadcast, scoped to this one event.
    *
-   * The order is deliberate, each step cheapest-and-safest-first:
-   *
-   * 1. **Validate** the frame (`MessageSendFrameDto` — the same content
-   *    rules REST's body runs through), so a malformed frame is refused
-   *    before it can reach Redis or Postgres.
-   * 2. **Spend the `message-send` budget** — the same channel-dimensioned
-   *    bucket the REST route uses, so switching transport cannot double a
-   *    caller's allowance. Refusal is an ack, not a disconnect
-   *    (rate-limiter.md section 6).
-   * 3. **Resolve `post`** for `(caller, channel)`. Nest guards do not run
-   *    around gateway handlers, so this calls the same `resolveCapability`
-   *    path the HTTP guard uses — a client that never rendered a Send button
-   *    is still refused server-side (PRD NFR-5).
-   * 4. **Check the room**: a frame naming a channel this socket is not
-   *    joined to is refused. Not-joined is refused as `NOT_FOUND`, the same
-   *    non-answer the hiding rule gives — the socket's room set is its whole
-   *    visible world, and a 403 would say more than a 404 about a channel
-   *    outside it. The refusal is not an authorization failure: the owner
-   *    whose brand-new channel predates a reconnect hits it too, and is
-   *    expected to refresh.
-   * 5. **Recall** the idempotency key: a repeat inside the 30-second window
-   *    gets the original result — one ack, no second row, and **no
-   *    re-broadcast** (a judgment call: the room already saw that message,
-   *    and replaying it would duplicate every client's history for a
-   *    client-side retry).
-   * 6. **Write** through `ChatService.postMessage` — the single write path,
-   *    shared with REST — then **file** the result under the key, **ack**
-   *    the sender, and **broadcast**.
+   * The order is deliberate, cheapest-and-safest-first: **validate** the
+   * frame (`MessageSendFrameDto` — the same content rules REST's body runs
+   * through), then **`admit`** it (budget, `post`, room — one shared step),
+   * then **recall** the idempotency key: a repeat inside the 30-second
+   * window gets the original result — one ack, no second row, and **no
+   * re-broadcast** (a judgment call: the room already saw that message, and
+   * replaying it would duplicate every client's history for a client-side
+   * retry). Finally **write** through `ChatService.postMessage` — the single
+   * write path, shared with REST — **file** the result under the key,
+   * **ack** the sender, and **broadcast**.
    *
    * Every failure on every step leaves the connection up and arrives as
    * `{ idempotencyKey?, error: { code, retryable } }`, so the client can
@@ -162,24 +174,10 @@ export class ChatGateway implements OnGatewayConnection {
     try {
       const frame = await parseMessageSendFrame(raw);
 
-      const limitError = await this.limitFrame('message-send', {
-        ip: socket.data.ip,
-        userId: socket.data.user.id,
-        channelId: frame.channelId,
-      });
+      const refusal = await this.admit(socket, frame.channelId, 'message-send');
 
-      if (limitError !== null) {
-        ack?.({ idempotencyKey: frame.idempotencyKey, error: limitError });
-        return;
-      }
-
-      await this.chat.requirePost(frame.channelId, socket.data.user.id);
-
-      if (!socket.rooms.has(frame.channelId.toString())) {
-        ack?.({
-          idempotencyKey: frame.idempotencyKey,
-          error: { code: 'NOT_FOUND', retryable: false },
-        });
+      if (refusal !== null) {
+        ack?.({ idempotencyKey: frame.idempotencyKey, error: refusal });
         return;
       }
 
@@ -214,7 +212,7 @@ export class ChatGateway implements OnGatewayConnection {
         messageId: response.id,
         createdAt: response.createdAt,
       });
-      this.broadcast(frame.channelId, response);
+      this.broadcastCreate(frame.channelId, response);
     } catch (error) {
       // A domain refusal is an answered question, not a fault; anything else
       // is a bug and belongs in the log with its stack.
@@ -226,6 +224,207 @@ export class ChatGateway implements OnGatewayConnection {
 
       ack?.({ idempotencyKey, error: ackErrorFrom(error) });
     }
+  }
+
+  /**
+   * A client edits one of its own messages (#66). Same skeleton as
+   * `message_send`, same ack protocol — but the mutation itself is not
+   * reimplemented here: `ChatService.editMessage` is what #62 wrote, and it
+   * owns the message-level rules (exists, belongs to this channel, not
+   * deleted, author-only). The handler resolves only what a guard would
+   * have, via `admit`.
+   *
+   * A deduped replay acks and does **not** re-broadcast, for the reason
+   * above: re-running the edit would re-stamp `editedAt`, and re-emitting
+   * would move every client's marker for a client-side retry.
+   */
+  @SubscribeMessage('message_edit')
+  async onMessageEdit(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() raw: unknown,
+    @Ack() ack?: (response: EditAck) => void,
+  ): Promise<void> {
+    const idempotencyKey = ackKeyOf(raw);
+
+    try {
+      const frame = await parseMessageEditFrame(raw);
+
+      // `strict-mutation`, the same bucket REST's `PATCH` spends from:
+      // switching transport cannot double a caller's allowance.
+      const refusal = await this.admit(
+        socket,
+        frame.channelId,
+        'strict-mutation',
+      );
+
+      if (refusal !== null) {
+        ack?.({ idempotencyKey: frame.idempotencyKey, error: refusal });
+        return;
+      }
+
+      const filed = await this.state.recallEdit(
+        socket.data.user.id,
+        frame.idempotencyKey,
+      );
+
+      if (filed !== null) {
+        ack?.({
+          idempotencyKey: frame.idempotencyKey,
+          messageId: filed.messageId,
+          editedAt: filed.editedAt,
+        });
+        return;
+      }
+
+      const message = await this.chat.editMessage(
+        frame.channelId,
+        frame.messageId,
+        socket.data.user.id,
+        frame.content,
+      );
+      const response = toMessageResponse(message, this.snowflakes);
+
+      await this.state.rememberEdit(socket.data.user.id, frame.idempotencyKey, {
+        messageId: response.id,
+        editedAt: response.editedAt,
+      });
+
+      ack?.({
+        idempotencyKey: frame.idempotencyKey,
+        messageId: response.id,
+        editedAt: response.editedAt,
+      });
+      this.broadcastUpdate(frame.channelId, response);
+    } catch (error) {
+      if (!(error instanceof DomainError)) {
+        this.logger.error(
+          `message_edit failed for user ${socket.data.user.id}: ${String(error)}`,
+        );
+      }
+
+      ack?.({ idempotencyKey, error: ackErrorFrom(error) });
+    }
+  }
+
+  /**
+   * A client deletes a message (#66). Again the skeleton of `message_send`,
+   * with `ChatService.deleteMessage` doing the work — including the two-step
+   * check (#63): author-only without more, `delete_others` re-resolved
+   * through the same `resolveCapability` the guard uses for anyone else.
+   *
+   * The ack and the broadcast carry the id only. The content was blanked by
+   * the write itself; nothing here could leak it even by bug, because the
+   * payload is built from the frame, after the service returned.
+   *
+   * A deduped replay acks and does not re-broadcast — the room was already
+   * told once.
+   */
+  @SubscribeMessage('message_delete')
+  async onMessageDelete(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() raw: unknown,
+    @Ack() ack?: (response: DeleteAck) => void,
+  ): Promise<void> {
+    const idempotencyKey = ackKeyOf(raw);
+
+    try {
+      const frame = await parseMessageDeleteFrame(raw);
+
+      const refusal = await this.admit(
+        socket,
+        frame.channelId,
+        'strict-mutation',
+      );
+
+      if (refusal !== null) {
+        ack?.({ idempotencyKey: frame.idempotencyKey, error: refusal });
+        return;
+      }
+
+      const filed = await this.state.recallDelete(
+        socket.data.user.id,
+        frame.idempotencyKey,
+      );
+
+      if (filed !== null) {
+        ack?.({
+          idempotencyKey: frame.idempotencyKey,
+          messageId: filed.messageId,
+        });
+        return;
+      }
+
+      await this.chat.deleteMessage(
+        frame.channelId,
+        frame.messageId,
+        socket.data.user.id,
+      );
+
+      const messageId = frame.messageId.toString();
+
+      await this.state.rememberDelete(
+        socket.data.user.id,
+        frame.idempotencyKey,
+        {
+          messageId,
+        },
+      );
+
+      ack?.({ idempotencyKey: frame.idempotencyKey, messageId });
+      this.broadcastDelete(frame.channelId, {
+        id: messageId,
+        channelId: frame.channelId.toString(),
+      });
+    } catch (error) {
+      if (!(error instanceof DomainError)) {
+        this.logger.error(
+          `message_delete failed for user ${socket.data.user.id}: ${String(error)}`,
+        );
+      }
+
+      ack?.({ idempotencyKey, error: ackErrorFrom(error) });
+    }
+  }
+
+  /**
+   * The steps every frame repeats, in the order #65 fixed them: spend the
+   * budget for `policy`, resolve `post` for `(caller, channel)`, confirm the
+   * socket actually holds the channel's room. Returns the `error` half of
+   * the failure ack to send, or `null` when the frame may proceed.
+   *
+   * One home for the three, so `message_edit` and `message_delete` cannot
+   * drift into a different order — and so #70 has the single escalation hook
+   * it expects (`limitFrame`, one call per frame; rate-limiter.md section 6:
+   * refusal is an ack, the connection stays up).
+   *
+   * `post`, not a per-frame capability: REST resolves `post` for both the
+   * edit and the delete route, and the message-level rules (author-only
+   * edit, the two-step delete check) stay in `ChatService` where #62 and #63
+   * wrote them — this resolves the transport gap a guard would have covered,
+   * nothing more. Not-joined is refused as `NOT_FOUND`, the same non-answer
+   * the hiding rule gives: the socket's room set is its whole visible
+   * world, and a 403 would say more than a 404 about a channel outside it.
+   */
+  private async admit(
+    socket: AuthenticatedSocket,
+    channelId: bigint,
+    policy: RateLimitPolicyName,
+  ): Promise<AckError | null> {
+    const limitError = await this.limitFrame(policy, {
+      ip: socket.data.ip,
+      userId: socket.data.user.id,
+      channelId,
+    });
+
+    if (limitError !== null) return limitError;
+
+    await this.chat.requirePost(channelId, socket.data.user.id);
+
+    if (!socket.rooms.has(channelId.toString())) {
+      return { code: 'NOT_FOUND', retryable: false };
+    }
+
+    return null;
   }
 
   /**

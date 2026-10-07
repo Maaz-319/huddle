@@ -151,8 +151,10 @@ export class ChatService {
    *    B by putting B's message id in A's URL. This is the whole reason the
    *    nested route needs a check beyond what the guard provides.
    * 3. **The caller must be the author.** Nobody edits anybody else's message
-   *    — not a moderator, not the server owner. `post` was already proved by
-   *    the guard; editing is writing, and losing `post` freezes your history.
+   *    — not a moderator, not the server owner. `post` was already proved
+   *    before this runs — by the guard on HTTP, by `requirePost` through the
+   *    gateway — and editing is writing, so losing `post` freezes your
+   *    history.
    *
    * A soft-deleted message is rejected with 400: the caller can see the
    * message exists (so 404 would be a lie), but resurrecting content after a
@@ -202,10 +204,11 @@ export class ChatService {
    * **The two-step check is deliberate:**
    *
    * 1. The route decorator uses `@RequireCapability('post')`, the weaker of
-   *    the two capabilities. The guard has already resolved `post` before this
-   *    method runs, including the owner short-circuit, the private-channel
-   *    hiding rule, and channel overrides. This covers the "delete your own"
-   *    case.
+   *    the two capabilities. The guard — or `requirePost`, which the gateway
+   *    calls because no guard wraps its handlers — has already resolved
+   *    `post` before this method runs, including the owner short-circuit,
+   *    the private-channel hiding rule, and channel overrides. This covers
+   *    the "delete your own" case.
    * 2. For "delete someone else's", we re-resolve `delete_others` using the
    *    same `resolveCapability` path the guard uses. The guard cannot do this
    *    because it has not loaded the message — it does not know whether the

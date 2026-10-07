@@ -73,7 +73,7 @@ export class MessageController {
     );
     const response = toMessageResponse(message, this.snowflakes);
 
-    this.gateway.broadcast(channelId, response);
+    this.gateway.broadcastCreate(channelId, response);
 
     return response;
   }
@@ -91,6 +91,10 @@ export class MessageController {
    *
    * Content validation is reused from `SendMessageDto` — same trim, same
    * empty rejection, same 2048-character cap.
+   *
+   * The response doubles as the `message_update` broadcast (#66), for the
+   * same reason the POST's does: one emit site, reached from whichever
+   * transport triggered the change.
    */
   @Patch(':messageId')
   @UseGuards(RequireCapabilityGuard)
@@ -109,8 +113,11 @@ export class MessageController {
       user.id,
       dto.content,
     );
+    const response = toMessageResponse(message, this.snowflakes);
 
-    return toMessageResponse(message, this.snowflakes);
+    this.gateway.broadcastUpdate(channelId, response);
+
+    return response;
   }
 
   /**
@@ -127,6 +134,12 @@ export class MessageController {
    * 204, no body: the caller asked for a side effect, not a representation.
    * Idempotent: deleting an already-deleted message returns 204 without
    * moving `deletedAt`.
+   *
+   * The `message_delete` broadcast (#66) fires on every 204, including the
+   * idempotent repeat: telling the room a second time that a row is gone is
+   * a no-op on every client, and avoiding it would mean widening
+   * `ChatService.deleteMessage` to report whether it changed anything — a
+   * signature bought for one redundant event.
    */
   @Delete(':messageId')
   @UseGuards(RequireCapabilityGuard)
@@ -139,6 +152,13 @@ export class MessageController {
     @CurrentUser() user: User,
   ): Promise<void> {
     await this.chat.deleteMessage(channelId, messageId, user.id);
+
+    // Both ids come from the route — nothing needs to hand the (blanked)
+    // message back just to build the payload.
+    this.gateway.broadcastDelete(channelId, {
+      id: messageId.toString(),
+      channelId: channelId.toString(),
+    });
   }
 
   /**
