@@ -4,6 +4,7 @@ import {
   EditResult,
   SEND_RETENTION_MS,
   SendResult,
+  TYPING_DEBOUNCE_MS,
 } from '../../src/chat/chat-state-store.interface';
 
 interface Filed<Result> {
@@ -13,27 +14,39 @@ interface Filed<Result> {
 
 /**
  * In-memory `ChatStateStore`, for unit tests of everything that depends on
- * the port — the gateway's ack/dedupe path — without Docker.
+ * the port — the gateway's ack/dedupe path and the typing debounce — without
+ * Docker.
  *
  * `extends ChatStateStore` rather than duck-typing it: adding a method to the
  * port then breaks compilation here, which is the only thing keeping a fake
- * honest as the port grows. The three kinds get one map each, so recalling a
- * send can never hand back an edit's result — the same isolation the real
- * adapter gets from its op-namespaced keys.
+ * honest as the port grows. The three mutation kinds get one map each, so
+ * recalling a send can never hand back an edit's result — the same isolation
+ * the real adapter gets from its op-namespaced keys.
  *
  * Unlike the rate-limit fake, this one *does* model expiry: the retention
- * window is part of the port's contract (the shared suite asserts it), and a
- * fake that remembered forever would make that contract pass while the real
- * adapter expired keys. The clock is `Date.now` at call time — the port's
- * methods take no timestamp, so wall time is the only thing both
- * implementations can be compared on.
+ * and debounce windows are part of the port's contract (the shared suite
+ * asserts each), and a fake that remembered forever would make that contract
+ * pass while the real adapter expired keys. The clock is `Date.now` at call
+ * time — the port's methods take no timestamp, so wall time is the only
+ * thing both implementations can be compared on.
  */
 export class FakeChatStateStore extends ChatStateStore {
   private readonly sendEntries = new Map<string, Filed<SendResult>>();
   private readonly editEntries = new Map<string, Filed<EditResult>>();
   private readonly deleteEntries = new Map<string, Filed<DeleteResult>>();
 
-  constructor(public ttlMs: number = SEND_RETENTION_MS) {
+  /**
+   * Field → the window's start, for the typing debounce. Expiry is judged on
+   * read against `debounceMs` rather than by deleting on a timer, mirroring
+   * how the Redis adapter's `PX` lets Redis expire the key lazily — a stale
+   * entry behaves exactly like a missing one.
+   */
+  private readonly typingWindows = new Map<string, number>();
+
+  constructor(
+    public ttlMs: number = SEND_RETENTION_MS,
+    public debounceMs: number = TYPING_DEBOUNCE_MS,
+  ) {
     super();
   }
 
@@ -66,6 +79,19 @@ export class FakeChatStateStore extends ChatStateStore {
 
   recallDelete(userId: bigint, key: string): Promise<DeleteResult | null> {
     return Promise.resolve(this.recallFrom(this.deleteEntries, userId, key));
+  }
+
+  markTyping(userId: bigint, channelId: bigint): Promise<boolean> {
+    const field = `${userId.toString()}:${channelId.toString()}`;
+    const windowStart = this.typingWindows.get(field);
+    const now = Date.now();
+
+    if (windowStart !== undefined && now - windowStart < this.debounceMs) {
+      return Promise.resolve(false);
+    }
+
+    this.typingWindows.set(field, now);
+    return Promise.resolve(true);
   }
 
   private file<Result>(

@@ -45,8 +45,10 @@ export const RATE_LIMIT_POLICIES = {
   /**
    * Section 4, "Typing indicator": a cheap bucket. Roomy enough that a fast
    * typist never sees it, tight enough to cap a script. The server-side
-   * debounce section 4 also asks for is Phase 8's job, with the transport it
-   * debounces — this is only the ceiling behind it.
+   * debounce (chat-service.md section 7) now lives in ChatGateway's typing
+   * handler — this is the ceiling *behind* it: only frames the debounce let
+   * through reach this bucket, so it caps the aggregate flood across everyone
+   * typing in the channel rather than counting keystrokes.
    */
   typing: { capacity: 10, refillPerSecond: 2, dimension: 'channel' },
 

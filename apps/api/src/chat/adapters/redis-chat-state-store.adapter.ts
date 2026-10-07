@@ -6,54 +6,66 @@ import {
   EditResult,
   SEND_RETENTION_MS,
   SendResult,
+  TYPING_DEBOUNCE_MS,
 } from '../chat-state-store.interface';
 
 /**
- * The three kinds of result the port files, and therefore the three key
- * namespaces. Declared here rather than shared: only the implementations
- * care about how a key is composed, and the contract suite's cross-operation
- * case is what keeps them honest.
+ * The three kinds of result the port files plus the typing flag, and
+ * therefore the four key namespaces. Declared here rather than shared: only
+ * the implementations care about how a key is composed, and the contract
+ * suite's cross-operation case is what keeps them honest.
  */
-type StateOp = 'send' | 'edit' | 'delete';
+type StateOp = 'send' | 'edit' | 'delete' | 'typing';
 
 /**
- * Redis-backed idempotency for message mutations — the only file in
- * `src/chat/` that may inject `RedisService` (AGENTS.md section 2); that
- * confinement is what keeps the port swappable.
+ * Redis-backed socket state — the idempotency of message mutations plus the
+ * typing debounce (#67), and the only file in `src/chat/` that may inject
+ * `RedisService` (AGENTS.md section 2); that confinement is what keeps the
+ * port swappable.
  *
- * One string key per `(user, op, nonce)`, holding the ack as JSON, with a
- * `PX` expiry of `ttlMs`. A plain `SET`/`GET` pair is enough — there is no
- * read-modify-write here: the value is written once, whole, and read back.
- * (The rate limiter's Lua script exists because it *does* read-decide-write.)
+ * Idempotency entries: one string key per `(user, op, nonce)`, holding the
+ * ack as JSON, with a `PX` expiry of `ttlMs`. A plain `SET`/`GET` pair is
+ * enough — there is no read-modify-write here: the value is written once,
+ * whole, and read back. (The rate limiter's Lua script exists because it
+ * *does* read-decide-write.)
  *
- * The op sits in the key (`huddle:chat:edit:…` beside `huddle:chat:send:…`)
- * because the three kinds share one retention window but must never answer
- * each other: the same nonce replayed as a different operation is a
- * different mutation, not a retry of this one.
+ * The typing flag is the one key that *is* an atomic check-and-set: a
+ * `SET ... NX PX debounceMs`, which returns `OK` only when the window was
+ * free — Redis decides that in one command, so two frames racing from the
+ * same socket can never both win the window.
+ *
+ * The op sits in the key (`huddle:chat:edit:…` beside `huddle:chat:send:…`,
+ * `huddle:chat:typing:…` beside those) because the kinds share namespaces
+ * only where it is safe: the three mutations share one retention window but
+ * must never answer each other, and the typing flag is a live window rather
+ * than a filed result at all.
  *
  * `ttlMs` is a constructor parameter defaulting to the port's documented
- * 30-second window (chat-service.md section 4). It is injectable so a test
- * can shrink the window and assert the "after the window" half of the
- * idempotency AC without sleeping for thirty seconds.
+ * 30-second window (chat-service.md section 4); `debounceMs` likewise
+ * defaults to `TYPING_DEBOUNCE_MS`. They are injectable so a test can shrink
+ * a window and assert the "after the window" half of an expiry AC without
+ * sleeping the real duration.
  *
- * Losing the value — eviction, restart, expiry — yields `null`, which callers
- * treat as "do it for real": at worst one duplicate mutation, which is
- * exactly the failure mode AGENTS.md section 8 declares acceptable for
- * everything Redis holds here.
+ * Losing a value — eviction, restart, expiry — yields `null` for a recall
+ * and a fresh `true` for the flag, which is the safe direction: at worst one
+ * duplicate mutation or one extra broadcast, exactly the failure mode
+ * AGENTS.md section 8 declares acceptable for everything Redis holds here.
  */
 @Injectable()
 export class RedisChatStateStore extends ChatStateStore {
   /**
-   * `@Optional()` on the TTL: TypeScript emits every constructor parameter
-   * into Nest's `design:paramtypes` metadata even when it has a default, and
-   * Nest would then try to resolve a provider of type `Number` and fail at
-   * boot. Optional makes it fall through to `undefined`, and `undefined`
-   * applies the default — which is exactly what DI wants (30 seconds) while
-   * `new RedisChatStateStore(redis, ttlMs)` in a test still passes its own.
+   * `@Optional()` on both windows: TypeScript emits every constructor
+   * parameter into Nest's `design:paramtypes` metadata even when it has a
+   * default, and Nest would then try to resolve providers of type `Number`
+   * and fail at boot. Optional makes them fall through to `undefined`, and
+   * `undefined` applies the defaults — which is exactly what DI wants (30
+   * seconds, 3 seconds) while `new RedisChatStateStore(redis, ttl, debounce)`
+   * in a test still passes its own.
    */
   constructor(
     private readonly redis: RedisService,
     @Optional() public ttlMs: number = SEND_RETENTION_MS,
+    @Optional() public debounceMs: number = TYPING_DEBOUNCE_MS,
   ) {
     super();
   }
@@ -95,6 +107,29 @@ export class RedisChatStateStore extends ChatStateStore {
     key: string,
   ): Promise<DeleteResult | null> {
     return this.read('delete', userId, key, isDeleteResult);
+  }
+
+  /**
+   * The typing debounce as one atomic `SET ... NX PX` (#67): `OK` only if
+   * the window was free, `null` if a frame already holds it — so `true`
+   * means "broadcast", `false` means "drop". `NX` decides both halves in
+   * the single command; a read-then-write here would let two racing frames
+   * both win the same window, which is exactly the fan-out the debounce
+   * exists to stop.
+   *
+   * The value is a placeholder flag, not JSON — nothing ever reads it back;
+   * only its existence and expiry matter.
+   */
+  async markTyping(userId: bigint, channelId: bigint): Promise<boolean> {
+    const set = await this.redis.set(
+      this.fieldFor('typing', userId, channelId.toString()),
+      '1',
+      'PX',
+      this.debounceMs,
+      'NX',
+    );
+
+    return set === 'OK';
   }
 
   /**
