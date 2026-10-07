@@ -21,13 +21,8 @@ import type {
 import { ChatService } from './chat.service';
 import { ChatStateStore } from './chat-state-store.interface';
 import { MessageResponse, toMessageResponse } from './message-response';
-import {
-  ackErrorFrom,
-  ackKeyOf,
-  AckError,
-  parseMessageSendFrame,
-  SendAck,
-} from './message-send.frame';
+import { parseMessageSendFrame, SendAck } from './message-send.frame';
+import { ackErrorFrom, ackKeyOf, AckError } from './socket-frame';
 
 /**
  * The WebSocket transport: one multiplexed connection per client, no
