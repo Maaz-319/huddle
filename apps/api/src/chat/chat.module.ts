@@ -13,12 +13,14 @@ import { MessageRepository } from './message-repository.interface';
 
 /**
  * Messages: persistence, history, the socket.io gateway that broadcasts
- * them, and from #65 the `message_send` path they arrive on.
+ * them, and from #65/#66 the three frames that mutate them — `message_send`,
+ * `message_edit`, `message_delete`.
  *
  * Ports: `MessageRepository` (Postgres) and `ChatStateStore` (Redis,
  * idempotency — intentionally ephemeral, AGENTS.md section 8). `ChatService`
  * is what the REST routes and the gateway both call; the gateway additionally
- * owns the room set and the single `broadcast` emit site.
+ * owns the room set and the broadcast trio — the single emit site for
+ * `message_create` / `message_update` / `message_delete`.
  *
  * `AuthModule` is imported for `SessionAuthGuard`.
  *
@@ -33,9 +35,10 @@ import { MessageRepository } from './message-repository.interface';
  * handler; the delete escalation only triggers when the caller is not the
  * author.
  *
- * `RateLimiterModule` is imported for the gateway's per-frame
- * `message-send` check — the same `RateLimiterService` the REST guard uses,
- * so both transports spend from one bucket.
+ * `RateLimiterModule` is imported for the gateway's per-frame budget checks
+ * — `message-send` on sends and `strict-mutation` on edits and deletes, the
+ * same `RateLimiterService` the REST guards use, so both transports spend
+ * from one bucket.
  *
  * The guard is then listed below for the same reason `AdministrationModule`
  * lists it: so the wiring is a declaration rather than something that happens
@@ -51,8 +54,9 @@ import { MessageRepository } from './message-repository.interface';
     { provide: ChatStateStore, useClass: RedisChatStateStore },
     ChatService,
     // The socket.io gateway, registered as a provider so Nest instantiates
-    // it: `handleConnection` joins rooms on connect (#64) and
-    // `onMessageSend` handles `message_send` (#65). It injects
+    // it: `handleConnection` joins rooms on connect (#64), and the three
+    // frame handlers (`message_send` #65, `message_edit`/`message_delete`
+    // #66) ack the sender and broadcast. It injects
     // `AdministrationService`, `ChatService`, `ChatStateStore`,
     // `RateLimiterService` and `SnowflakeService`.
     ChatGateway,
