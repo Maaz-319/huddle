@@ -15,6 +15,17 @@ export const CHAT_STATE_CONTRACT_KEY_PREFIX =
   'huddle:test:chat-state-contract:';
 
 /**
+ * A Redis cleanup pattern addressing every typing key this suite can write.
+ * The typing flag is keyed by `(user, channel)` rather than by the prefixed
+ * nonce above, so its keys cannot be caught by
+ * `CHAT_STATE_CONTRACT_KEY_PREFIX` — instead they lean on the user ids
+ * `freshUser()` mints (`9_900_001` upward, always matching a `99*` glob),
+ * which real Snowflake ids never match (their top bits hold a 2020s epoch
+ * timestamp, landing in the `2*` range for millennia).
+ */
+export const CHAT_STATE_CONTRACT_TYPING_PATTERN = 'huddle:chat:typing:99*:*';
+
+/**
  * The retention window used by every case that is not asserting expiry — the
  * port's documented default (chat-service.md section 4).
  */
@@ -26,9 +37,13 @@ const EXPIRY_TTL_MS = 250;
 /**
  * Builds a store for one case. The fake constructs a new one; the integration
  * suite hands back a fresh adapter over the same Redis, so the `ttlMs` a case
- * asks for actually applies (expiry is per-SET, decided at write time).
+ * asks for actually applies (expiry is per-SET, decided at write time). The
+ * optional `debounceMs` shrinks the typing window the same way.
  */
-export type ChatStateStoreFactory = (ttlMs: number) => Promise<ChatStateStore>;
+export type ChatStateStoreFactory = (
+  ttlMs: number,
+  debounceMs?: number,
+) => Promise<ChatStateStore>;
 
 /** Fixed results to file; the contract only ever compares them to themselves. */
 const SEND_RESULT = {
@@ -70,7 +85,9 @@ function sleep(ms: number): Promise<void> {
  *
  * Since #66 the same six cases run once per operation (send, edit, delete)
  * plus a cross-operation case: all three file results under one retention
- * window, and none of them may answer another's replay.
+ * window, and none of them may answer another's replay. #67 adds the
+ * `markTyping` window: first frame fresh, repeats dropped, and the window
+ * scoped per user *and* per channel.
  */
 export function describeChatStateStoreContract(
   label: string,
@@ -87,6 +104,15 @@ export function describeChatStateStoreContract(
      */
     let nextUser = 9_900_000n;
     const freshUser = (): bigint => (nextUser += 1n);
+
+    /**
+     * Channel ids for the typing window, on their own counter above the same
+     * floor as `freshUser` — kept separate so a case can pair one user with
+     * several channels (and vice versa) without the ids colliding.
+     */
+    let nextChannel = 9_950_000n;
+    const freshChannel = (): bigint => (nextChannel += 1n);
+
     const freshKey = (): string =>
       `${CHAT_STATE_CONTRACT_KEY_PREFIX}${label}:${caseCounter++}:${Date.now()}`;
 
@@ -220,6 +246,68 @@ export function describeChatStateStoreContract(
       await expect(store.recallDelete(user, key)).resolves.toEqual(
         DELETE_RESULT,
       );
+    });
+
+    describe('markTyping', () => {
+      it('opens the window on the first frame and drops every repeat inside it', async () => {
+        const user = freshUser();
+        const channel = freshChannel();
+
+        await expect(store.markTyping(user, channel)).resolves.toBe(true);
+        await expect(store.markTyping(user, channel)).resolves.toBe(false);
+        await expect(store.markTyping(user, channel)).resolves.toBe(false);
+      });
+
+      it('scopes the window per channel: one user broadcasts in two channels separately', async () => {
+        const user = freshUser();
+        const alpha = freshChannel();
+        const beta = freshChannel();
+
+        await expect(store.markTyping(user, alpha)).resolves.toBe(true);
+        await expect(store.markTyping(user, beta)).resolves.toBe(true);
+
+        // A repeat in one channel must not be judged against the other's
+        // window — the debounce is (user, channel), not user.
+        await expect(store.markTyping(user, alpha)).resolves.toBe(false);
+        await expect(store.markTyping(user, beta)).resolves.toBe(false);
+      });
+
+      it('scopes the window per user: two people in one channel broadcast separately', async () => {
+        const channel = freshChannel();
+        const mine = freshUser();
+        const yours = freshUser();
+
+        await expect(store.markTyping(mine, channel)).resolves.toBe(true);
+        await expect(store.markTyping(yours, channel)).resolves.toBe(true);
+
+        // Two typists in one room each broadcast once per window; neither
+        // consumes the other's.
+        await expect(store.markTyping(mine, channel)).resolves.toBe(false);
+        await expect(store.markTyping(yours, channel)).resolves.toBe(false);
+      });
+
+      it('opens a fresh window once the debounce has passed', async () => {
+        const debounceStore = await createStore(DEFAULT_TTL_MS, EXPIRY_TTL_MS);
+        const user = freshUser();
+        const channel = freshChannel();
+
+        await expect(debounceStore.markTyping(user, channel)).resolves.toBe(
+          true,
+        );
+
+        // Halfway through it is still claimed — and if the first call had
+        // not actually filed anything, the "closed" half below would pass
+        // for the wrong reason, so both halves belong to one case.
+        await sleep(EXPIRY_TTL_MS / 2);
+        await expect(debounceStore.markTyping(user, channel)).resolves.toBe(
+          false,
+        );
+
+        await sleep(EXPIRY_TTL_MS);
+        await expect(debounceStore.markTyping(user, channel)).resolves.toBe(
+          true,
+        );
+      });
     });
   });
 }

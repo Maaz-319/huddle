@@ -42,6 +42,16 @@ export interface DeleteResult {
 export const SEND_RETENTION_MS = 30_000;
 
 /**
+ * The typing debounce window docs/architecture/chat-service.md section 7
+ * fixes at "~3 seconds per user per channel": the first `typing` frame of a
+ * window goes on to broadcast, every repeat inside it is dropped before it
+ * can fan out. Kept here beside the retention window because both are the
+ * port's contract, and the contract suite asserts each against both
+ * implementations.
+ */
+export const TYPING_DEBOUNCE_MS = 3_000;
+
+/**
  * Phase 8's short-lived socket state, Redis-backed: one port holds all of it
  * so #67 and #70 add their methods here rather than each inventing a store
  * (issue #65's spec).
@@ -107,4 +117,21 @@ export abstract class ChatStateStore {
     userId: bigint,
     key: string,
   ): Promise<DeleteResult | null>;
+
+  /**
+   * Whether `(userId, channelId)` is the **first** typing frame of its
+   * debounce window: `true` sets the window and says "broadcast", `false`
+   * means a frame already claimed it and this one must be dropped
+   * (#67, chat-service.md section 7).
+   *
+   * The window is per user **and** per channel — typing in two channels
+   * broadcasts in both, and two people typing in one channel broadcast
+   * separately — so the key spans both ids.
+   *
+   * A `false` is the normal case while somebody types: the caller drops the
+   * frame silently, with no error frame and nothing the rate limiter ever
+   * sees. Implementations may shorten the window via their constructor so
+   * tests need not sleep the default `TYPING_DEBOUNCE_MS`.
+   */
+  abstract markTyping(userId: bigint, channelId: bigint): Promise<boolean>;
 }

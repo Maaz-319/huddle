@@ -4,10 +4,12 @@ import { RedisChatStateStore } from '../src/chat/adapters/redis-chat-state-store
 import {
   ChatStateStore,
   SEND_RETENTION_MS,
+  TYPING_DEBOUNCE_MS,
 } from '../src/chat/chat-state-store.interface';
 import { RedisService } from '../src/common/redis.service';
 import {
   CHAT_STATE_CONTRACT_KEY_PREFIX,
+  CHAT_STATE_CONTRACT_TYPING_PATTERN,
   describeChatStateStoreContract,
 } from './fakes/chat-state-store.contract';
 
@@ -59,13 +61,16 @@ describe('RedisChatStateStore', () => {
     // Scoped to exactly what this file writes — contract keys are told apart
     // by the contract's prefix sitting inside the adapter's `:<key>` segment
     // — so a development idempotency key is never swept up, and
-    // `npm run test:integration` passes twice in a row.
+    // `npm run test:integration` passes twice in a row. Typing flags have no
+    // prefixed nonce to hang off, so they match on the contract's `99*` user
+    // floor instead (CHAT_STATE_CONTRACT_TYPING_PATTERN).
     const contractKeys = await redis.keys(CONTRACT_PATTERN);
+    const typingKeys = await redis.keys(CHAT_STATE_CONTRACT_TYPING_PATTERN);
     const ownKeys: string[] = [];
     for (const prefix of PREFIXES) {
       ownKeys.push(...(await redis.keys(`${prefix}*:${prefix}*`)));
     }
-    const all = [...contractKeys, ...ownKeys];
+    const all = [...contractKeys, ...typingKeys, ...ownKeys];
     if (all.length > 0) await redis.del(...all);
   });
 
@@ -80,8 +85,8 @@ describe('RedisChatStateStore', () => {
     expect(store).toBeInstanceOf(RedisChatStateStore);
   });
 
-  describeChatStateStoreContract('RedisChatStateStore', (ttlMs) =>
-    Promise.resolve(new RedisChatStateStore(redis, ttlMs)),
+  describeChatStateStoreContract('RedisChatStateStore', (ttlMs, debounceMs) =>
+    Promise.resolve(new RedisChatStateStore(redis, ttlMs, debounceMs)),
   );
 
   describe('behaviour that needs real Redis', () => {
@@ -136,6 +141,23 @@ describe('RedisChatStateStore', () => {
       await redis.set(field, 'not json', 'PX', 30_000);
 
       await expect(store.recallSend(user, key)).resolves.toBeNull();
+    });
+
+    it('files the typing flag as a millisecond-expiry key under the typing namespace', async () => {
+      const user = 9_990_004n;
+      const channel = 42_424_242n;
+      const field = `huddle:chat:typing:${user.toString()}:${channel.toString()}`;
+
+      await expect(store.markTyping(user, channel)).resolves.toBe(true);
+      await expect(redis.type(field)).resolves.toBe('string');
+
+      const ttl = await redis.pttl(field);
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(TYPING_DEBOUNCE_MS);
+
+      // The NX half against real Redis: the second call loses the same way
+      // the contract's drop case says it must.
+      await expect(store.markTyping(user, channel)).resolves.toBe(false);
     });
   });
 });
