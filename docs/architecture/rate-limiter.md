@@ -89,15 +89,21 @@ These numbers are starting points and are meant to be retuned. `apps/api/src/rat
 
 - **REST, rejection:** `429` + a `Retry-After` header, in the standard error body shape (`{ "error": { "code": "RATE_LIMITED", ... } }`). `Retry-After` is whole seconds **rounded up** — a `Retry-After: 0` tells a client to retry immediately, which is the opposite of the intent.
 - **REST, every rate-limited response:** `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`, on the allowed responses too. This is the half of Discord's pattern that lets clients back off *proactively*; `Retry-After` alone only tells a client what to do once it has already been rejected.
-- **WS event/frame violation:** an error frame scoped to the offending event only — the message/event is dropped, the connection stays up.
+- **WS event/frame violation:** an error frame scoped to the offending event only — the message/event is dropped, the connection stays up *for that refusal*. Each refusal is also **counted per user**; what the count does is §7.
 - **WS connection-attempt violation:** rejected in the `io.use()` middleware — `next(new Error(...))` carrying a `retryAfter` value in the error's `data` payload, delivered to the client as a `connect_error` (no HTTP `429`/`Retry-After` header, since this isn't a raw HTTP response) — before any WS connection is established.
 
 ---
 
 ## 7. Escalation
 
-- Per-event WS violations are tracked per user within a rolling window.
-- **5 violations within 60 seconds → forced disconnect** of that WS connection (not just a dropped frame) — sustained abuse escalates beyond per-event error frames.
+Per-event WS refusals are answers; escalation is what happens across them.
+
+- **What counts:** a per-event **budget refusal** — the `RATE_LIMITED` ack the frame's own handler sends (§6). Validation and permission refusals are *answers to the frame*, not budget burns, and do not count: a client sending garbage is not the same client as one ignoring `retryable`. A limiter outage refuses (§5's fail-closed stance) but does not count either — a violation is something the **client** did.
+- **How it is tracked:** one counter **per user**, in a **fixed 60-second window opened by the user's first violation** — later violations neither extend nor restart it, so pausing between refusals does not keep the counter (or the connection) alive; only sixty quiet seconds reset it. The count lives in Redis and is ephemeral like everything else there (AGENTS.md §8): a restart grants a clean slate, which fails lenient — a flood goes free, never an innocent user locked out.
+- **5 violations within the window → forced disconnect** of **the connection that committed the fifth** (not just a dropped frame). The count is shared across every connection the user holds — laundering a flood through a second socket does not reset it — but only the offending socket is closed: the user's other connections are not collateral, and other users' connections certainly are not. Reconnecting is subject to the `ws-connect` budget (§4), so escalation is not a reconnect loop.
+- **The client is told before it is cut off:** a `policy_violation` event `{ "error": { "code": "TOO_MANY_VIOLATIONS", "retryable": false } }` — the same error shape as a frame ack (chat-service.md §4), minus the idempotency key, since it answers no frame in particular — is emitted first, then the socket is closed a beat later so the refusal ack for the offending frame has already left. Without the notice a client cannot tell "disconnected for hammering" from "the network died". `retryable: false`: retrying the same frame is what earned the disconnect.
+
+In code: the count is `ChatStateStore.recordViolation` (one port method, both implementations, contract suite included); the hook is the gateway's `limitFrame`, the single place every per-event refusal of every frame passes through, and `escalateOnViolation` beside it does the notice-and-close.
 
 ---
 

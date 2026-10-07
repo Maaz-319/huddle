@@ -52,6 +52,27 @@ export const SEND_RETENTION_MS = 30_000;
 export const TYPING_DEBOUNCE_MS = 3_000;
 
 /**
+ * The escalation window docs/architecture/rate-limiter.md section 7 fixes for
+ * counting a user's rate-limit refusals: refusals inside one minute of the
+ * first count toward a disconnect, the window then expires and the counter
+ * starts over. Sixty seconds is chosen so an honest retry storm cools off on
+ * its own while a scripted flood cannot pace itself just under the limit and
+ * keep going forever. Kept beside the other two windows because all three are
+ * the port's contract, and the contract suite asserts each against both
+ * implementations.
+ */
+export const VIOLATION_WINDOW_MS = 60_000;
+
+/**
+ * How many rate-limit refusals inside one `VIOLATION_WINDOW_MS` window
+ * escalate to a disconnect (#70, rate-limiter.md section 7). Five is one more
+ * than the strictest per-event budget admits in a second, so a single unlucky
+ * burst never trips it — a client has to be refused repeatedly, i.e. ignoring
+ * `retryable: true` and hammering anyway, before its socket is closed.
+ */
+export const VIOLATION_LIMIT = 5;
+
+/**
  * Phase 8's short-lived socket state, Redis-backed: one port holds all of it
  * so #67 and #70 add their methods here rather than each inventing a store
  * (issue #65's spec).
@@ -134,4 +155,28 @@ export abstract class ChatStateStore {
    * tests need not sleep the default `TYPING_DEBOUNCE_MS`.
    */
   abstract markTyping(userId: bigint, channelId: bigint): Promise<boolean>;
+
+  /**
+   * Counts one rate-limit refusal against `userId` inside the current
+   * `VIOLATION_WINDOW_MS` window and returns the new count — the number the
+   * gateway compares against `VIOLATION_LIMIT` to decide whether this refusal
+   * is the one that closes the connection (#70, rate-limiter.md section 7).
+   *
+   * The window is fixed from the **first** violation: the first call opens it
+   * and later calls neither extend nor restart it, so a flood cannot keep its
+   * own counter alive by pausing briefly between refusals — only actually
+   * going quiet for a full window resets it. Per user, not per connection:
+   * violations accumulate across every socket the user has open, while only
+   * the socket that committed the violation is disconnected.
+   *
+   * The decision to disconnect belongs to the caller, not the store: this
+   * method only counts, and the gateway decides what a count means for the
+   * frame it just refused. Implementations may shorten the window via their
+   * constructor so tests need not wait the default `VIOLATION_WINDOW_MS`.
+   *
+   * Like everything else here it is **intentionally ephemeral**: a Redis
+   * restart zeroes the counters, which fails in the lenient direction (a
+   * flood gets a clean slate, never an innocent user locked out).
+   */
+  abstract recordViolation(userId: bigint): Promise<number>;
 }

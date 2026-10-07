@@ -26,6 +26,15 @@ export const CHAT_STATE_CONTRACT_KEY_PREFIX =
 export const CHAT_STATE_CONTRACT_TYPING_PATTERN = 'huddle:chat:typing:99*:*';
 
 /**
+ * The same idea for the escalation counters (#70): keyed by user alone
+ * (`huddle:chat:violations:<user>`), no nonce to hang a prefix off, so the
+ * cleanup glob matches on `freshUser()`'s `99*` floor for the same reason
+ * the typing pattern does.
+ */
+export const CHAT_STATE_CONTRACT_VIOLATIONS_PATTERN =
+  'huddle:chat:violations:99*';
+
+/**
  * The retention window used by every case that is not asserting expiry — the
  * port's documented default (chat-service.md section 4).
  */
@@ -35,14 +44,25 @@ const DEFAULT_TTL_MS = 30_000;
 const EXPIRY_TTL_MS = 250;
 
 /**
+ * The escalation window used by the "does later work extend it?" case — two
+ * seconds, so that case can sleep against its edges with hundreds of
+ * milliseconds of margin instead of racing a few hundred milliseconds of
+ * timer jitter. The plain expiry case reuses `EXPIRY_TTL_MS` above, at the
+ * same margins the typing expiry case already accepts.
+ */
+const VIOLATION_TEST_WINDOW_MS = 2_000;
+
+/**
  * Builds a store for one case. The fake constructs a new one; the integration
  * suite hands back a fresh adapter over the same Redis, so the `ttlMs` a case
  * asks for actually applies (expiry is per-SET, decided at write time). The
- * optional `debounceMs` shrinks the typing window the same way.
+ * optional `debounceMs` shrinks the typing window the same way, and
+ * `violationWindowMs` the escalation window.
  */
 export type ChatStateStoreFactory = (
   ttlMs: number,
   debounceMs?: number,
+  violationWindowMs?: number,
 ) => Promise<ChatStateStore>;
 
 /** Fixed results to file; the contract only ever compares them to themselves. */
@@ -87,7 +107,9 @@ function sleep(ms: number): Promise<void> {
  * plus a cross-operation case: all three file results under one retention
  * window, and none of them may answer another's replay. #67 adds the
  * `markTyping` window: first frame fresh, repeats dropped, and the window
- * scoped per user *and* per channel.
+ * scoped per user *and* per channel. #70 adds `recordViolation`: a count
+ * that climbs per user, expires on the first violation's deadline rather
+ * than on the latest, and starts over once the window passes.
  */
 export function describeChatStateStoreContract(
   label: string,
@@ -307,6 +329,75 @@ export function describeChatStateStoreContract(
         await expect(debounceStore.markTyping(user, channel)).resolves.toBe(
           true,
         );
+      });
+    });
+
+    describe('recordViolation', () => {
+      it("counts a user's refusals up from one", async () => {
+        const user = freshUser();
+
+        await expect(store.recordViolation(user)).resolves.toBe(1);
+        await expect(store.recordViolation(user)).resolves.toBe(2);
+        await expect(store.recordViolation(user)).resolves.toBe(3);
+      });
+
+      it('scopes the count per user: two floods count separately', async () => {
+        const mine = freshUser();
+        const yours = freshUser();
+
+        // Two misbehaving users must never move each other's counter — the
+        // gateway compares one user's count against VIOLATION_LIMIT, so a
+        // shared count would disconnect the wrong person.
+        await expect(store.recordViolation(mine)).resolves.toBe(1);
+        await expect(store.recordViolation(yours)).resolves.toBe(1);
+        await expect(store.recordViolation(mine)).resolves.toBe(2);
+        await expect(store.recordViolation(yours)).resolves.toBe(2);
+      });
+
+      it('keeps counting inside the window and starts over once it passes', async () => {
+        const shortStore = await createStore(
+          DEFAULT_TTL_MS,
+          undefined,
+          EXPIRY_TTL_MS,
+        );
+        const user = freshUser();
+
+        await expect(shortStore.recordViolation(user)).resolves.toBe(1);
+
+        // Halfway through the window it is still the same count — and if
+        // the first call had not actually filed anything, the "starts over"
+        // half below would pass for the wrong reason, so both halves belong
+        // to one case (the same shape as the typing and retention cases).
+        await sleep(EXPIRY_TTL_MS / 2);
+        await expect(shortStore.recordViolation(user)).resolves.toBe(2);
+
+        await sleep(EXPIRY_TTL_MS);
+        await expect(shortStore.recordViolation(user)).resolves.toBe(1);
+      });
+
+      it('fixes the deadline at the first violation: later ones do not extend it', async () => {
+        const windowStore = await createStore(
+          DEFAULT_TTL_MS,
+          undefined,
+          VIOLATION_TEST_WINDOW_MS,
+        );
+        const user = freshUser();
+
+        await expect(windowStore.recordViolation(user)).resolves.toBe(1);
+
+        // Halfway to the deadline, still counting.
+        await sleep(VIOLATION_TEST_WINDOW_MS / 2);
+        await expect(windowStore.recordViolation(user)).resolves.toBe(2);
+
+        // Past the deadline the first violation set, but well inside a
+        // window a "reset on every call" implementation would have opened
+        // at the second one: counting must have started over at 1, not
+        // climbed to 3. Without this case, pausing between refusals would
+        // let a flood keep its counter — and its connection — alive forever.
+        await sleep(
+          VIOLATION_TEST_WINDOW_MS / 2 + VIOLATION_TEST_WINDOW_MS / 4,
+        );
+        await expect(windowStore.recordViolation(user)).resolves.toBe(1);
       });
     });
   });
