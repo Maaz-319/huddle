@@ -28,7 +28,7 @@ import type {
   AuthenticatedSocket,
 } from './chat.io-adapter';
 import { ChatService } from './chat.service';
-import { ChatStateStore } from './chat-state-store.interface';
+import { ChatStateStore, VIOLATION_LIMIT } from './chat-state-store.interface';
 import {
   CatchUpAck,
   CatchUpChannelResponse,
@@ -43,8 +43,23 @@ import {
   toMessageResponse,
 } from './message-response';
 import { parseMessageSendFrame, SendAck } from './message-send.frame';
-import { ackErrorFrom, ackKeyOf, AckError } from './socket-frame';
+import {
+  ackErrorFrom,
+  ackKeyOf,
+  AckError,
+  POLICY_VIOLATION_EVENT,
+  type PolicyViolation,
+} from './socket-frame';
 import { parseTypingFrame, TypingAck, TypingBroadcast } from './typing.frame';
+
+/**
+ * The beat between the `policy_violation` notice and the close it
+ * announces (see `escalateOnViolation`): the notice and the offending
+ * frame's own refusal ack both leave inside it — the notice on scheduling,
+ * the ack the microtasks after — while no new frame meaningfully slips
+ * through a connection already sentenced.
+ */
+const POLICY_VIOLATION_GRACE_MS = 100;
 
 /**
  * The WebSocket transport: one multiplexed connection per client, no
@@ -67,12 +82,23 @@ import { parseTypingFrame, TypingAck, TypingBroadcast } from './typing.frame';
  * shape the reply (repo-structure.md section 4; socket.io is the documented
  * exception to the port/adapter rule, not a licence to put logic here). The
  * things it owns that no service does: the room set (only it knows the
- * sockets exist) and the broadcast sites — the single place each of the
- * events from chat-service.md section 3 is emitted.
+ * sockets exist), the broadcast sites — the single place each of the events
+ * from chat-service.md section 3 is emitted — and, since #70, closing a
+ * connection for repeated budget refusals (rate-limiter.md section 7):
+ * disconnecting is a socket act, so it lives where the sockets do.
  */
 @WebSocketGateway()
 export class ChatGateway implements OnGatewayConnection {
   private readonly logger = new Logger(ChatGateway.name);
+
+  /**
+   * Connections `escalateOnViolation` has already notified (#70): the
+   * `policy_violation` notice is sent once per socket, and the first
+   * notice is what schedules the close — later refusals inside the grace
+   * only keep counting. Weakly held: when the socket goes, so does the
+   * record.
+   */
+  private readonly escalated = new WeakSet<AuthenticatedSocket>();
 
   /**
    * The socket.io server Nest binds here once the adapter has created it.
@@ -225,8 +251,9 @@ export class ChatGateway implements OnGatewayConnection {
   }
 
   /**
-   * The single-socket emit path, used only by `reconcileUser`. It goes
-   * through `server.to(socket.id)` rather than `socket.emit(...)` because
+   * The single-socket emit path, used by `reconcileUser` and by the
+   * escalation notice (`escalateOnViolation`). It goes through
+   * `server.to(socket.id)` rather than `socket.emit(...)` because
    * both are typed against `Record<string, never>` for client events —
    * the map is deliberately empty (chat.io-adapter) — and a direct emit
    * against it resolves the payload to `never`, refusing every argument,
@@ -581,11 +608,11 @@ export class ChatGateway implements OnGatewayConnection {
 
       if (!fresh) return;
 
-      const limitRefusal = await this.limitFrame('typing', {
-        ip: socket.data.ip,
-        userId: socket.data.user.id,
-        channelId: frame.channelId,
-      });
+      const limitRefusal = await this.limitFrame(
+        socket,
+        'typing',
+        frame.channelId,
+      );
 
       if (limitRefusal !== null) {
         ack?.({ error: limitRefusal });
@@ -651,10 +678,7 @@ export class ChatGateway implements OnGatewayConnection {
     try {
       const frame = await parseCatchUpFrame(raw);
 
-      const refusal = await this.limitFrame('read', {
-        ip: socket.data.ip,
-        userId: socket.data.user.id,
-      });
+      const refusal = await this.limitFrame(socket, 'read');
 
       if (refusal !== null) {
         ack?.({ error: refusal });
@@ -706,9 +730,11 @@ export class ChatGateway implements OnGatewayConnection {
    * the failure ack to send, or `null` when the frame may proceed.
    *
    * One home for the three, so `message_edit` and `message_delete` cannot
-   * drift into a different order — and so #70 has the single escalation hook
-   * it expects (`limitFrame`, one call per frame; rate-limiter.md section 6:
-   * refusal is an ack, the connection stays up).
+   * drift into a different order — and the single place #70's escalation
+   * hook sits: every budget refusal of every frame
+   * (rate-limiter.md section 6: refusal is an ack, the connection stays up
+   * *per refusal*) passes through `limitFrame` exactly once, which counts it
+   * toward the disconnect the same section 7 defines.
    *
    * `typing` is the one frame that does *not* call `admit`: its debounce
    * has to run before the budget (see `onTyping`), so it sequences
@@ -720,11 +746,7 @@ export class ChatGateway implements OnGatewayConnection {
     channelId: bigint,
     policy: RateLimitPolicyName,
   ): Promise<AckError | null> {
-    const limitError = await this.limitFrame(policy, {
-      ip: socket.data.ip,
-      userId: socket.data.user.id,
-      channelId,
-    });
+    const limitError = await this.limitFrame(socket, policy, channelId);
 
     if (limitError !== null) return limitError;
 
@@ -763,29 +785,97 @@ export class ChatGateway implements OnGatewayConnection {
 
   /**
    * The one place a per-frame budget is spent, and the one place a refusal
-   * is shaped (#65) — so #70 has a single hook to escalate from (closing the
-   * socket on repeated refusals) without re-deriving which policy applies.
+   * is shaped (#65) — which makes it #70's single escalation hook: a refusal
+   * here is the only event that counts toward a disconnect, so every frame
+   * is counted the same way without re-deriving which policy applies.
    *
-   * The connection stays up on refusal, per rate-limiter.md section 6: the
-   * frame is dropped, the error rides the frame's own ack.
+   * The connection stays up *per refusal*, per rate-limiter.md section 6:
+   * the frame is dropped, the error rides the frame's own ack. What #70
+   * adds is the arc across refusals — see `escalateOnViolation`.
+   *
+   * Takes the socket rather than a ready-made `RateLimitContext` so the
+   * context is built exactly once, from the handshake identity no frame can
+   * replace, and so a refusal can be escalated on the very socket that
+   * earned it.
    *
    * Fails closed if the limiter itself is down, the same stance the REST
    * guard and the handshake take: refusing one message costs a retry;
-   * admitting messages with no budget costs the budget.
+   * admitting messages with no budget costs the budget. An outage refuses
+   * but does **not** count — a violation is something the *client* did, and
+   * Redis being down is not that (the counting failure inside
+   * `escalateOnViolation` fails open for the same reason in reverse).
    */
   private async limitFrame(
+    socket: AuthenticatedSocket,
     policy: RateLimitPolicyName,
-    context: RateLimitContext,
+    channelId?: bigint,
   ): Promise<AckError | null> {
     try {
+      const context: RateLimitContext = {
+        ip: socket.data.ip,
+        userId: socket.data.user.id,
+        channelId,
+      };
       const decision = await this.rateLimiter.consume(policy, context);
 
-      return decision.allowed
-        ? null
-        : { code: 'RATE_LIMITED', retryable: true };
+      if (decision.allowed) return null;
+
+      await this.escalateOnViolation(socket);
+      return { code: 'RATE_LIMITED', retryable: true };
     } catch (error) {
       this.logger.error(`${policy} frame limit failed: ${String(error)}`);
       return { code: 'RATE_LIMITED', retryable: true };
+    }
+  }
+
+  /**
+   * #70's escalation (rate-limiter.md section 7): count this refusal
+   * against the user; at `VIOLATION_LIMIT` inside the window, tell the
+   * offending connection why it is closing, then close it.
+   *
+   * Counting is per user, closing is per socket. Violations accumulate
+   * across *every* connection the user holds — a flood laundered through a
+   * second socket must not reset the count — but only the socket that was
+   * just refused is closed: the user's other, well-behaved connections are
+   * not collateral, and other users certainly are not.
+   *
+   * The notice is emitted here, inside `limitFrame`, and the close is
+   * deferred a beat after it (`POLICY_VIOLATION_GRACE_MS`): the handler is
+   * still waiting on this method and will ack the refusal the moment it
+   * returns, so the client receives the notice, then that ack, then the
+   * close — all three before the transport dies. An immediate disconnect
+   * would race the ack out and lose the frame's answer. Refusals that
+   * arrive inside the grace neither re-send the notice nor postpone the
+   * close; they only keep counting, for any *other* connection that later
+   * earns its own.
+   *
+   * A counting failure logs and moves on: the refusal it was counting has
+   * already been decided and is returned regardless — a broken counter
+   * must never swallow a refusal, and never disconnect anybody either.
+   * The window and the count live in Redis and are ephemeral like
+   * everything else there (AGENTS.md section 8): a restart grants a flood
+   * a clean slate, which fails lenient — the safe direction.
+   */
+  private async escalateOnViolation(
+    socket: AuthenticatedSocket,
+  ): Promise<void> {
+    try {
+      const count = await this.state.recordViolation(socket.data.user.id);
+
+      if (count < VIOLATION_LIMIT || this.escalated.has(socket)) return;
+      this.escalated.add(socket);
+
+      this.reachSocket(socket.id).emit(POLICY_VIOLATION_EVENT, {
+        error: { code: 'TOO_MANY_VIOLATIONS', retryable: false },
+      } satisfies PolicyViolation);
+
+      setTimeout(() => {
+        if (socket.connected) socket.disconnect(true);
+      }, POLICY_VIOLATION_GRACE_MS);
+    } catch (error) {
+      this.logger.error(
+        `violation count failed for user ${socket.data.user.id}: ${String(error)}`,
+      );
     }
   }
 }

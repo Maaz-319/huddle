@@ -44,6 +44,31 @@ export interface AckFailure {
 }
 
 /**
+ * The server→client notice that closes an escalating connection (#70,
+ * rate-limiter.md section 7): the gateway emits it immediately before
+ * disconnecting a socket whose user just reached `VIOLATION_LIMIT` refusals
+ * inside one window.
+ *
+ * Deliberately *not* an ack: it answers no frame in particular (the refusal
+ * that tipped the count has already been acked on its own), and it must
+ * arrive before the transport-level close so a client can tell "I was
+ * disconnected for hammering" from "the network died" — a distinction the
+ * close frame itself cannot make.
+ */
+export const POLICY_VIOLATION_EVENT = 'policy_violation';
+
+/**
+ * What the notice carries: the same `error` shape every failure ack uses,
+ * so a client's existing error handling reads it without a second pathway.
+ * No `idempotencyKey` — see `POLICY_VIOLATION_EVENT`. The code is
+ * `TOO_MANY_VIOLATIONS`, `retryable: false`: retrying the same frame as-is
+ * is exactly the behaviour that earned the disconnect.
+ */
+export interface PolicyViolation {
+  error: AckError;
+}
+
+/**
  * The `idempotencyKey` to echo on a failure, read off the raw payload —
  * validation may be what failed, and this must work before (or without) a
  * parsed frame existing.
