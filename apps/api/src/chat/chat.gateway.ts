@@ -20,6 +20,12 @@ import type {
 } from './chat.io-adapter';
 import { ChatService } from './chat.service';
 import { ChatStateStore } from './chat-state-store.interface';
+import {
+  CatchUpAck,
+  CatchUpChannelResponse,
+  CATCH_UP_LIMIT,
+  parseCatchUpFrame,
+} from './catch-up.frame';
 import { DeleteAck, parseMessageDeleteFrame } from './message-delete.frame';
 import { EditAck, parseMessageEditFrame } from './message-edit.frame';
 import {
@@ -43,7 +49,10 @@ import { parseTypingFrame, TypingAck, TypingBroadcast } from './typing.frame';
  * calls, ack the sender, and broadcast to the room. `typing` (#67) rides
  * the same rooms with its own sequence — authorize, debounce, budget,
  * broadcast — because its budget is the ceiling *behind* the debounce,
- * not the first gate.
+ * not the first gate. `catch_up` (#68) is the one read in the set:
+ * validate, spend from `read`, resolve visibility in bulk, fetch what the
+ * client missed through the same forward query REST's `?after=` uses, and
+ * ack — never a broadcast, since only the sender is behind.
  *
  * The gateway stays thin, like a controller — validate, call the service,
  * shape the reply (repo-structure.md section 4; socket.io is the documented
@@ -459,6 +468,98 @@ export class ChatGateway implements OnGatewayConnection {
       if (!(error instanceof DomainError)) {
         this.logger.error(
           `typing failed for user ${socket.data.user.id}: ${String(error)}`,
+        );
+      }
+
+      ack?.({ error: ackErrorFrom(error) });
+    }
+  }
+
+  /**
+   * A reconnecting client asks for everything it missed (#68,
+   * chat-service.md section 6): one frame naming every channel it holds
+   * state for, one ack carrying the messages each channel is missing after
+   * the id the client last saw — no gap, however long it was away, and no
+   * re-downloading pages it already has.
+   *
+   * The sequence, cheapest-first:
+   *
+   * 1. **validate** — the channels array and both ids per entry, bounded at
+   *    `CATCH_UP_MAX_CHANNELS` so one reconnect cannot hand the handler an
+   *    unbounded work set;
+   * 2. **budget** — one `read` token for the whole frame, not one per
+   *    channel: the reason a client sends one frame instead of thirty is
+   *    that a reconnect should cost one spend;
+   * 3. **resolve visibility in bulk** — `listAccessibleChannels`, the same
+   *    `resolveCapability` pass that built this socket's rooms on
+   *    connection, run fresh here rather than trusted from the room set.
+   *    A requested channel outside it is **omitted, not errored**: it never
+   *    existed, or access was revoked while the client was away, and an
+   *    error of any kind would confirm existence to a caller who can no
+   *    longer see the channel — an existence oracle;
+   * 4. **fetch** — `ChatService.getHistory` with an `after` cursor, the
+   *    forward query #61 wrote for REST's `?after=` (no new SQL), capped at
+   *    `CATCH_UP_LIMIT`. `hasMore` becomes `truncated`, so the client knows
+   *    to fall back to a fresh history load rather than render a
+   *    gap-containing list;
+   * 5. **ack** this one socket — never a broadcast: only this client is
+   *    behind, and nobody else asked for anything.
+   *
+   * No idempotency key by design: this is a read with nothing to dedupe.
+   * The reply is pure state, so a retried frame simply asks again, and the
+   * failure half is the same shape every other frame sends.
+   */
+  @SubscribeMessage('catch_up')
+  async onCatchUp(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() raw: unknown,
+    @Ack() ack?: (response: CatchUpAck) => void,
+  ): Promise<void> {
+    try {
+      const frame = await parseCatchUpFrame(raw);
+
+      const refusal = await this.limitFrame('read', {
+        ip: socket.data.ip,
+        userId: socket.data.user.id,
+      });
+
+      if (refusal !== null) {
+        ack?.({ error: refusal });
+        return;
+      }
+
+      const visible = await this.administration.listAccessibleChannels(
+        socket.data.user.id,
+      );
+      const visibleIds = new Set(visible.map((channel) => channel.id));
+
+      const channels: CatchUpChannelResponse[] = [];
+
+      for (const request of frame.channels) {
+        // Outside the visible set — never existed or revoked while away —
+        // omitted with no error at all, for the oracle reason above.
+        if (!visibleIds.has(request.channelId)) continue;
+
+        const page = await this.chat.getHistory(
+          request.channelId,
+          { after: request.afterMessageId },
+          CATCH_UP_LIMIT,
+        );
+
+        channels.push({
+          channelId: request.channelId.toString(),
+          messages: page.messages.map((message) =>
+            toMessageResponse(message, this.snowflakes),
+          ),
+          truncated: page.hasMore,
+        });
+      }
+
+      ack?.({ channels });
+    } catch (error) {
+      if (!(error instanceof DomainError)) {
+        this.logger.error(
+          `catch_up failed for user ${socket.data.user.id}: ${String(error)}`,
         );
       }
 
