@@ -29,6 +29,7 @@ import {
 } from './message-response';
 import { parseMessageSendFrame, SendAck } from './message-send.frame';
 import { ackErrorFrom, ackKeyOf, AckError } from './socket-frame';
+import { parseTypingFrame, TypingAck, TypingBroadcast } from './typing.frame';
 
 /**
  * The WebSocket transport: one multiplexed connection per client, no
@@ -39,13 +40,16 @@ import { ackErrorFrom, ackKeyOf, AckError } from './socket-frame';
  * into. The three mutation frames then ride that map: `message_send`
  * (#65), `message_edit` and `message_delete` (#66) each validate, spend
  * from a frame budget, dedupe, call the same `ChatService` method REST
- * calls, ack the sender, and broadcast to the room.
+ * calls, ack the sender, and broadcast to the room. `typing` (#67) rides
+ * the same rooms with its own sequence — authorize, debounce, budget,
+ * broadcast — because its budget is the ceiling *behind* the debounce,
+ * not the first gate.
  *
  * The gateway stays thin, like a controller — validate, call the service,
  * shape the reply (repo-structure.md section 4; socket.io is the documented
  * exception to the port/adapter rule, not a licence to put logic here). The
  * things it owns that no service does: the room set (only it knows the
- * sockets exist) and the broadcast trio — the single place each of the three
+ * sockets exist) and the broadcast sites — the single place each of the
  * events from chat-service.md section 3 is emitted.
  */
 @WebSocketGateway()
@@ -387,9 +391,84 @@ export class ChatGateway implements OnGatewayConnection {
   }
 
   /**
+   * A client is composing (#67, chat-service.md section 7): every *other*
+   * socket in the channel's room hears `typing` at most once per debounce
+   * window per user — the sender itself is excluded (`socket.to`, not
+   * `io.to`).
+   *
+   * The sequence differs from `admit`'s on purpose, and the order is the
+   * design decision of #67:
+   *
+   * 1. **validate** the frame (one field — and its whitelist is what
+   *    rejects a forged `userId` before anything reads it);
+   * 2. **authorize** — `post` (someone who cannot write is not composing)
+   *    plus room membership, via the shared `authorize` step;
+   * 3. **debounce** — `markTyping` opens the window on `true`; a `false`
+   *    is dropped *silently*: no ack, no error frame, nothing the rate
+   *    limiter ever sees, because dropping is the normal case while
+   *    somebody types, not a violation;
+   * 4. **budget** — only frames the debounce let through spend from
+   *    `typing`, so the bucket is the ceiling *behind* the debounce: a
+   *    fast typist never sees it, a flood of watchers-in-the-making does;
+   * 5. **broadcast** to the room minus the sender.
+   *
+   * No success ack, by design — see `TypingAck`; refusals ride the ack as
+   * the same failure shape every other frame sends. And there is no
+   * stopped-typing event: see `typing.frame.ts` for why that is deliberate.
+   */
+  @SubscribeMessage('typing')
+  async onTyping(
+    @ConnectedSocket() socket: AuthenticatedSocket,
+    @MessageBody() raw: unknown,
+    @Ack() ack?: (response: TypingAck) => void,
+  ): Promise<void> {
+    try {
+      const frame = await parseTypingFrame(raw);
+
+      const refusal = await this.authorize(socket, frame.channelId);
+
+      if (refusal !== null) {
+        ack?.({ error: refusal });
+        return;
+      }
+
+      const fresh = await this.state.markTyping(
+        socket.data.user.id,
+        frame.channelId,
+      );
+
+      if (!fresh) return;
+
+      const limitRefusal = await this.limitFrame('typing', {
+        ip: socket.data.ip,
+        userId: socket.data.user.id,
+        channelId: frame.channelId,
+      });
+
+      if (limitRefusal !== null) {
+        ack?.({ error: limitRefusal });
+        return;
+      }
+
+      const broadcast: TypingBroadcast = {
+        channelId: frame.channelId.toString(),
+        userId: socket.data.user.id.toString(),
+      };
+      socket.to(frame.channelId.toString()).emit('typing', broadcast);
+    } catch (error) {
+      if (!(error instanceof DomainError)) {
+        this.logger.error(
+          `typing failed for user ${socket.data.user.id}: ${String(error)}`,
+        );
+      }
+
+      ack?.({ error: ackErrorFrom(error) });
+    }
+  }
+
+  /**
    * The steps every frame repeats, in the order #65 fixed them: spend the
-   * budget for `policy`, resolve `post` for `(caller, channel)`, confirm the
-   * socket actually holds the channel's room. Returns the `error` half of
+   * budget for `policy`, then authorize — returning the `error` half of
    * the failure ack to send, or `null` when the frame may proceed.
    *
    * One home for the three, so `message_edit` and `message_delete` cannot
@@ -397,13 +476,10 @@ export class ChatGateway implements OnGatewayConnection {
    * it expects (`limitFrame`, one call per frame; rate-limiter.md section 6:
    * refusal is an ack, the connection stays up).
    *
-   * `post`, not a per-frame capability: REST resolves `post` for both the
-   * edit and the delete route, and the message-level rules (author-only
-   * edit, the two-step delete check) stay in `ChatService` where #62 and #63
-   * wrote them — this resolves the transport gap a guard would have covered,
-   * nothing more. Not-joined is refused as `NOT_FOUND`, the same non-answer
-   * the hiding rule gives: the socket's room set is its whole visible
-   * world, and a 403 would say more than a 404 about a channel outside it.
+   * `typing` is the one frame that does *not* call `admit`: its debounce
+   * has to run before the budget (see `onTyping`), so it sequences
+   * `authorize` and `limitFrame` itself — with `authorize` below shared by
+   * both orders so the authorization rules still have one home.
    */
   private async admit(
     socket: AuthenticatedSocket,
@@ -418,6 +494,30 @@ export class ChatGateway implements OnGatewayConnection {
 
     if (limitError !== null) return limitError;
 
+    return this.authorize(socket, channelId);
+  }
+
+  /**
+   * The authorization half of a frame: resolve `post` for
+   * `(caller, channel)`, then confirm the socket actually holds the
+   * channel's room.
+   *
+   * `post`, not a per-frame capability: REST resolves `post` for both the
+   * edit and the delete route, and the message-level rules (author-only
+   * edit, the two-step delete check) stay in `ChatService` where #62 and #63
+   * wrote them — this resolves the transport gap a guard would have covered,
+   * nothing more. Not-joined is refused as `NOT_FOUND`, the same non-answer
+   * the hiding rule gives: the socket's room set is its whole visible
+   * world, and a 403 would say more than a 404 about a channel outside it.
+   *
+   * A `requirePost` refusal escapes as the `DomainError` the handler's catch
+   * maps through `ackErrorFrom` — exactly what the guard would have answered
+   * on REST.
+   */
+  private async authorize(
+    socket: AuthenticatedSocket,
+    channelId: bigint,
+  ): Promise<AckError | null> {
     await this.chat.requirePost(channelId, socket.data.user.id);
 
     if (!socket.rooms.has(channelId.toString())) {
