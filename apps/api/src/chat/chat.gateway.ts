@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
   Ack,
   ConnectedSocket,
@@ -8,6 +9,14 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import {
+  SERVER_ACCESS_CHANGED,
+  USER_ACCESS_CHANGED,
+} from '../administration/access-events';
+import type {
+  ServerAccessChanged,
+  UserAccessChanged,
+} from '../administration/access-events';
 import { AdministrationService } from '../administration/administration.service';
 import { DomainError } from '../common/errors';
 import { SnowflakeService } from '../common/snowflake.service';
@@ -106,6 +115,130 @@ export class ChatGateway implements OnGatewayConnection {
       );
       socket.disconnect(true);
     }
+  }
+
+  /**
+   * Live access changes scoped to one user (#69): seated into a private
+   * channel, removed from one, promoted, demoted — Administration emitted,
+   * and every connection that user holds is reconciled against
+   * `listAccessibleChannels`, the same pass `handleConnection` builds rooms
+   * from.
+   *
+   * Recomputed rather than acted on from the event payload: a demotion or a
+   * server-wide change moves channels no write named, and the issue's rule
+   * for this half is explicit — guessing who is affected is how a case gets
+   * missed. The reconcile runs both directions, so the grant half (a seat
+   * appearing mid-session) joins the room and pushes `channel_added` in the
+   * same pass that a revocation leaves and pushes `channel_removed`.
+   *
+   * A failure here is logged, not thrown: this runs detached from any
+   * request (the emitter does not await listeners), and the fallback for a
+   * reconcile that never lands is the next connection recomputing rooms
+   * anyway.
+   */
+  @OnEvent(USER_ACCESS_CHANGED)
+  async onUserAccessChanged(payload: UserAccessChanged): Promise<void> {
+    this.logger.debug(
+      `access changed for user ${payload.userId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+    );
+
+    await this.reconcileUser(payload.userId);
+  }
+
+  /**
+   * Live access changes that can move many users at once (#69): a channel
+   * flipped private, deleted, an override added or removed, a server
+   * deleted, ownership transferred.
+   *
+   * The payload names the server for the log line and nothing else: the
+   * gateway holds no membership data with which to scope the work to that
+   * server's members, deriving the set from the payloads would be exactly
+   * the guessing the issue warns against, and at single-instance scale
+   * (NFR-10) recomputing the connected set is a handful of indexed reads
+   * per user. The pass is idempotent — users nothing affected reconcile to
+   * zero changes.
+   */
+  @OnEvent(SERVER_ACCESS_CHANGED)
+  async onServerAccessChanged(payload: ServerAccessChanged): Promise<void> {
+    this.logger.debug(
+      `access changed in server ${payload.serverId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+    );
+
+    const userIds = new Set<bigint>();
+    for (const socket of this.server.sockets.sockets.values()) {
+      userIds.add(socket.data.user.id);
+    }
+
+    await Promise.all([...userIds].map((userId) => this.reconcileUser(userId)));
+  }
+
+  /**
+   * One user's live reconciliation: diff every connection they hold against
+   * their current accessible set — `socket.leave` plus a `channel_removed`
+   * for each room they lost, `socket.join` plus a `channel_added` for each
+   * they gained. Never a disconnect: losing a channel must not cost the
+   * connection (chat-service.md section 2).
+   *
+   * Order within a socket matters — leave first — so a room is empty before
+   * the client is told it is gone, and a join lands before its announcement.
+   * Both payloads are bare `{ channelId }`: the event, not the message
+   * stream, and the client does the local bookkeeping.
+   *
+   * Swallows and logs rather than throwing — see `onUserAccessChanged`.
+   */
+  private async reconcileUser(userId: bigint): Promise<void> {
+    try {
+      const connections = [...this.server.sockets.sockets.values()].filter(
+        (socket) => socket.data.user.id === userId,
+      );
+
+      // No live connection: nothing to reconcile now, and the next
+      // connection computes its rooms fresh anyway.
+      if (connections.length === 0) return;
+
+      const accessible =
+        await this.administration.listAccessibleChannels(userId);
+      const accessibleIds = new Set(
+        accessible.map((channel) => channel.id.toString()),
+      );
+
+      for (const socket of connections) {
+        for (const room of [...socket.rooms]) {
+          if (room === socket.id || accessibleIds.has(room)) continue;
+          await socket.leave(room);
+          this.reachSocket(socket.id).emit('channel_removed', {
+            channelId: room,
+          });
+        }
+
+        for (const channelId of accessibleIds) {
+          if (socket.rooms.has(channelId)) continue;
+          await socket.join(channelId);
+          this.reachSocket(socket.id).emit('channel_added', { channelId });
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `access reconcile failed for user ${userId.toString()}: ${String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * The single-socket emit path, used only by `reconcileUser`. It goes
+   * through `server.to(socket.id)` rather than `socket.emit(...)` because
+   * both are typed against `Record<string, never>` for client events —
+   * the map is deliberately empty (chat.io-adapter) — and a direct emit
+   * against it resolves the payload to `never`, refusing every argument,
+   * while the broadcast operator decorates that same map into something
+   * callable, which is how every existing emit in this class compiles.
+   * Every socket sits in a room named for its own id (the `room ===
+   * socket.id` skip above exists because of it), so targeting that room
+   * reaches exactly one connection — no wider than `socket.emit`, and
+   * without widening the type contract of every broadcast in the class.
+   */
+  private reachSocket(socketId: string): ReturnType<AuthenticatedServer['to']> {
+    return this.server.to(socketId);
   }
 
   /**
