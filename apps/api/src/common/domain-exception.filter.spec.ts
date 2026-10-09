@@ -1,11 +1,11 @@
 import {
   ArgumentsHost,
-  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { DomainExceptionFilter } from './domain-exception.filter';
+import { LoggerService } from './logger.service';
 import {
   ConflictError,
   DomainError,
@@ -22,6 +22,7 @@ describe('DomainExceptionFilter', () => {
   let setHeader: jest.Mock;
   let filter: DomainExceptionFilter;
   let host: ArgumentsHost;
+  let logger: LoggerService;
 
   beforeEach(() => {
     reply = jest.fn();
@@ -31,7 +32,20 @@ describe('DomainExceptionFilter', () => {
       httpAdapter: { reply, setHeader },
     } as unknown as HttpAdapterHost;
 
-    filter = new DomainExceptionFilter(adapterHost);
+    logger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
+    filter = new DomainExceptionFilter(adapterHost, logger);
 
     host = {
       switchToHttp: () => ({ getResponse: () => response }),
@@ -121,7 +135,7 @@ describe('DomainExceptionFilter', () => {
     let logged: jest.SpyInstance;
 
     beforeEach(() => {
-      logged = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      logged = jest.spyOn(logger, 'error').mockImplementation();
       filter.catch(new Error('postgres://user:hunter2@db:5432 refused'), host);
     });
 
@@ -145,14 +159,20 @@ describe('DomainExceptionFilter', () => {
     });
 
     it('is logged server-side with the real stack', () => {
-      const [, stack] = logged.mock.calls[0] as [string, string];
+      // logger.error is called with (context, message, meta)
+      // meta.error contains the stack
+      const [, , meta] = logged.mock.calls[0] as [
+        string,
+        string,
+        { error: string },
+      ];
 
-      expect(stack).toContain('hunter2');
+      expect(meta.error).toContain('hunter2');
     });
   });
 
   it('handles a thrown non-Error without crashing the filter', () => {
-    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const logged = jest.spyOn(logger, 'error').mockImplementation();
 
     filter.catch('just a string', host);
 
@@ -161,7 +181,11 @@ describe('DomainExceptionFilter', () => {
       { error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } },
       500,
     );
-    expect(logged).toHaveBeenCalledWith('Unhandled exception', 'just a string');
+    expect(logged).toHaveBeenCalledWith(
+      'DomainExceptionFilter',
+      'Unhandled exception',
+      expect.any(Object),
+    );
 
     logged.mockRestore();
   });

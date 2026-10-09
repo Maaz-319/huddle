@@ -6,6 +6,7 @@ import {
   HEARTBEAT_WINDOW_MS,
 } from '../src/presence/presence-store.interface';
 import { RedisService } from '../src/common/redis.service';
+import { LoggerService } from '../src/common/logger.service';
 import {
   DEFAULT_HEARTBEAT_MS,
   EXPIRY_HEARTBEAT_MS,
@@ -30,10 +31,24 @@ describe('RedisPresenceStore', () => {
   let store: PresenceStore;
 
   beforeAll(async () => {
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     module = await Test.createTestingModule({
       providers: [
         RedisService,
         { provide: ConfigService, useValue: { get: () => REDIS_URL } },
+        { provide: LoggerService, useValue: mockLogger },
         { provide: PresenceStore, useClass: RedisPresenceStore },
       ],
     }).compile();

@@ -1,19 +1,21 @@
 import { Global, Module, ValidationPipe } from '@nestjs/common';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_PIPE, APP_INTERCEPTOR } from '@nestjs/core';
 import { DomainExceptionFilter } from './domain-exception.filter';
 import { PrismaService } from './prisma.service';
 import { RedisService } from './redis.service';
 import { SnowflakeService } from './snowflake.service';
 import { validationExceptionFactory } from './validation-exception.factory';
+import { LoggerService } from './logger.service';
+import { CorrelationIdInterceptor } from './correlation-id.interceptor';
 
 /**
  * Shared primitives every other module may depend on. Global, so a feature
  * module gets these providers without importing this one explicitly.
  *
- * The pipe and the filter are registered here rather than in `main.ts` so that
- * they are equally active in tests that build the app from `AppModule`, which
- * never runs `main.ts`. Both tokens are application-scoped wherever they are
- * declared.
+ * The pipe, filter, and interceptor are registered here rather than in
+ * `main.ts` so that they are equally active in tests that build the app from
+ * `AppModule`, which never runs `main.ts`. All tokens are application-scoped
+ * wherever they are declared.
  */
 @Global()
 @Module({
@@ -21,6 +23,7 @@ import { validationExceptionFactory } from './validation-exception.factory';
     PrismaService,
     RedisService,
     SnowflakeService,
+    LoggerService,
     {
       provide: APP_PIPE,
       useValue: new ValidationPipe({
@@ -31,7 +34,8 @@ import { validationExceptionFactory } from './validation-exception.factory';
       }),
     },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
+    { provide: APP_INTERCEPTOR, useClass: CorrelationIdInterceptor },
   ],
-  exports: [PrismaService, RedisService, SnowflakeService],
+  exports: [PrismaService, RedisService, SnowflakeService, LoggerService],
 })
 export class CommonModule {}

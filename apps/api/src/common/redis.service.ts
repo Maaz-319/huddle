@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import { EnvironmentVariables } from './env.validation';
+import { LoggerService } from './logger.service';
 
 /**
  * How many times a lost connection is retried before the client gives up for
@@ -36,9 +37,12 @@ const RECONNECT_DELAY_CEILING_MS = 2000;
  */
 @Injectable()
 export class RedisService extends Redis implements OnModuleDestroy {
-  private readonly logger = new Logger(RedisService.name);
+  private readonly logger: LoggerService;
 
-  constructor(config: ConfigService<EnvironmentVariables, true>) {
+  constructor(
+    config: ConfigService<EnvironmentVariables, true>,
+    logger: LoggerService,
+  ) {
     super(config.get('REDIS_URL', { infer: true }), {
       // A command issued while the connection is down waits for at most two
       // reconnect attempts and is then flushed with an error. That is what
@@ -58,15 +62,18 @@ export class RedisService extends Redis implements OnModuleDestroy {
               RECONNECT_DELAY_CEILING_MS,
             ),
     });
+    this.logger = logger;
 
     // ioredis emits `error` on every failed reconnect, and an unhandled
     // `error` on an EventEmitter takes the process down with it.
     this.on('error', (error: Error) => {
-      this.logger.error(`Redis connection error: ${error.message}`);
+      this.logger.error('RedisService', 'Redis connection error', {
+        error: error.message,
+      });
     });
 
     this.on('ready', () => {
-      this.logger.log('Connected to Redis');
+      this.logger.log('RedisService', 'Connected to Redis');
     });
   }
 
@@ -77,9 +84,9 @@ export class RedisService extends Redis implements OnModuleDestroy {
     try {
       await this.quit();
     } catch (error) {
-      this.logger.warn(
-        `Redis did not close cleanly: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      this.logger.warn('RedisService', 'Redis did not close cleanly', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       this.disconnect();
     }
   }

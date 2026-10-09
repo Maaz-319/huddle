@@ -2,6 +2,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FakePresenceStore } from '../../test/fakes/fake-presence-store';
 import { PresenceService } from './presence.service';
 import { PRESENCE_ONLINE, PRESENCE_OFFLINE } from './presence-events';
+import { LoggerService } from '../common/logger.service';
 
 const USER_ID = 100000000000000001n;
 const OTHER_USER_ID = 100000000000000002n;
@@ -10,6 +11,7 @@ describe('PresenceService', () => {
   let service: PresenceService;
   let store: FakePresenceStore;
   let events: EventEmitter2;
+  let logger: LoggerService;
   let emittedEvents: Array<{ event: string; payload: { userId: bigint } }>;
 
   beforeEach(() => {
@@ -18,6 +20,20 @@ describe('PresenceService', () => {
     const staleThresholdMs = 50;
     store = new FakePresenceStore(heartbeatMs, staleThresholdMs);
     events = new EventEmitter2();
+
+    // Mock logger
+    logger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
 
     // Capture emitted events
     emittedEvents = [];
@@ -28,7 +44,7 @@ describe('PresenceService', () => {
       emittedEvents.push({ event: PRESENCE_OFFLINE, payload }),
     );
 
-    service = new PresenceService(store, events, staleThresholdMs);
+    service = new PresenceService(store, events, staleThresholdMs, logger);
   });
 
   afterEach(() => {

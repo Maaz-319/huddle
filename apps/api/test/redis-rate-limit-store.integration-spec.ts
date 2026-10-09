@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RedisService } from '../src/common/redis.service';
+import { LoggerService } from '../src/common/logger.service';
 import { RedisRateLimitStore } from '../src/rate-limiter/adapters/redis-rate-limit-store.adapter';
 import { RateLimitStore } from '../src/rate-limiter/rate-limit-store.interface';
 import {
@@ -38,10 +39,24 @@ describe('RedisRateLimitStore', () => {
   let store: RateLimitStore;
 
   beforeAll(async () => {
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     module = await Test.createTestingModule({
       providers: [
         RedisService,
         { provide: ConfigService, useValue: { get: () => REDIS_URL } },
+        { provide: LoggerService, useValue: mockLogger },
         { provide: RateLimitStore, useClass: RedisRateLimitStore },
       ],
     }).compile();

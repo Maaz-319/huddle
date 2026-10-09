@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   Ack,
@@ -19,6 +18,7 @@ import type {
 } from '../administration/access-events';
 import { AdministrationService } from '../administration/administration.service';
 import { DomainError } from '../common/errors';
+import { LoggerService } from '../common/logger.service';
 import { SnowflakeService } from '../common/snowflake.service';
 import type { RateLimitContext } from '../rate-limiter/rate-limit-key';
 import type { RateLimitPolicyName } from '../rate-limiter/rate-limit-policies';
@@ -91,7 +91,7 @@ const POLICY_VIOLATION_GRACE_MS = 100;
  */
 @WebSocketGateway()
 export class ChatGateway implements OnGatewayConnection {
-  private readonly logger = new Logger(ChatGateway.name);
+  private readonly logger: LoggerService;
 
   /**
    * Connections `escalateOnViolation` has already notified (#70): the
@@ -118,7 +118,10 @@ export class ChatGateway implements OnGatewayConnection {
     private readonly rateLimiter: RateLimiterService,
     private readonly snowflakes: SnowflakeService,
     private readonly presence: PresenceService,
-  ) {}
+    logger: LoggerService,
+  ) {
+    this.logger = logger;
+  }
 
   /**
    * Joins the socket to exactly the channels `GET /servers/:serverId/channels`
@@ -130,6 +133,9 @@ export class ChatGateway implements OnGatewayConnection {
    * is torn down instead and the client's reconnect recomputes from scratch.
    */
   async handleConnection(socket: AuthenticatedSocket): Promise<void> {
+    // Set socket ID as correlation ID for all logs during this connection
+    this.logger.setCorrelationId(socket.id, 'socketId');
+
     try {
       const channels = await this.administration.listAccessibleChannels(
         socket.data.user.id,
@@ -145,15 +151,27 @@ export class ChatGateway implements OnGatewayConnection {
       // Clean disconnect: socket closed gracefully (tab close, etc.)
       socket.on('disconnect', async () => {
         await this.presence.onDisconnect(socket.data.user.id, socket.id);
+        this.logger.clearCorrelationId();
       });
 
       // Heartbeat: socket.io pong received
       socket.on('pong', async () => {
         await this.presence.onHeartbeat(socket.data.user.id, socket.id);
       });
+
+      this.logger.debug(
+        'ChatGateway',
+        `User ${socket.data.user.id.toString()} connected, joined ${channels.length} channel(s)`,
+        {
+          userId: socket.data.user.id.toString(),
+          channelCount: channels.length,
+        },
+      );
     } catch (error) {
       this.logger.error(
-        `room subscription failed for user ${socket.data.user.id}: ${String(error)}`,
+        'ChatGateway',
+        `Room subscription failed for user ${socket.data.user.id.toString()}`,
+        { error: String(error), userId: socket.data.user.id.toString() },
       );
       socket.disconnect(true);
     }
@@ -181,7 +199,12 @@ export class ChatGateway implements OnGatewayConnection {
   @OnEvent(USER_ACCESS_CHANGED)
   async onUserAccessChanged(payload: UserAccessChanged): Promise<void> {
     this.logger.debug(
-      `access changed for user ${payload.userId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+      'ChatGateway',
+      `Access changed for user ${payload.userId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+      {
+        userId: payload.userId.toString(),
+        channelId: payload.channelId?.toString(),
+      },
     );
 
     await this.reconcileUser(payload.userId);
@@ -203,7 +226,12 @@ export class ChatGateway implements OnGatewayConnection {
   @OnEvent(SERVER_ACCESS_CHANGED)
   async onServerAccessChanged(payload: ServerAccessChanged): Promise<void> {
     this.logger.debug(
-      `access changed in server ${payload.serverId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+      'ChatGateway',
+      `Access changed in server ${payload.serverId.toString()}${payload.channelId === undefined ? '' : ` (channel ${payload.channelId.toString()})`}`,
+      {
+        serverId: payload.serverId.toString(),
+        channelId: payload.channelId?.toString(),
+      },
     );
 
     const userIds = new Set<bigint>();
@@ -226,7 +254,9 @@ export class ChatGateway implements OnGatewayConnection {
     if (recipients.length === 0) return;
 
     this.logger.debug(
+      'ChatGateway',
       `Broadcasting presence_online for user ${payload.userId.toString()} to ${recipients.length} user(s)`,
+      { userId: payload.userId.toString(), recipientCount: recipients.length },
     );
 
     for (const recipientId of recipients) {
@@ -251,7 +281,9 @@ export class ChatGateway implements OnGatewayConnection {
     if (recipients.length === 0) return;
 
     this.logger.debug(
+      'ChatGateway',
       `Broadcasting presence_offline for user ${payload.userId.toString()} to ${recipients.length} user(s)`,
+      { userId: payload.userId.toString(), recipientCount: recipients.length },
     );
 
     for (const recipientId of recipients) {
@@ -298,7 +330,9 @@ export class ChatGateway implements OnGatewayConnection {
       // If the user's servers were deleted (e.g., during test cleanup),
       // they have no shared servers with anyone
       this.logger.warn(
-        `Failed to get servers for user ${userId.toString()}: ${String(error)}`,
+        'ChatGateway',
+        `Failed to get servers for user ${userId.toString()}`,
+        { error: String(error), userId: userId.toString() },
       );
       return [];
     }
@@ -318,7 +352,9 @@ export class ChatGateway implements OnGatewayConnection {
       } catch (error) {
         // Skip users whose servers were deleted
         this.logger.warn(
-          `Failed to get servers for user ${connectedUserId.toString()}: ${String(error)}`,
+          'ChatGateway',
+          `Failed to get servers for user ${connectedUserId.toString()}`,
+          { error: String(error), userId: connectedUserId.toString() },
         );
         continue;
       }
@@ -381,7 +417,9 @@ export class ChatGateway implements OnGatewayConnection {
       }
     } catch (error) {
       this.logger.error(
-        `access reconcile failed for user ${userId.toString()}: ${String(error)}`,
+        'ChatGateway',
+        `Access reconcile failed for user ${userId.toString()}`,
+        { error: String(error), userId: userId.toString() },
       );
     }
   }
@@ -527,7 +565,9 @@ export class ChatGateway implements OnGatewayConnection {
       // is a bug and belongs in the log with its stack.
       if (!(error instanceof DomainError)) {
         this.logger.error(
-          `message_send failed for user ${socket.data.user.id}: ${String(error)}`,
+          'ChatGateway',
+          `message_send failed for user ${socket.data.user.id.toString()}`,
+          { error: String(error), userId: socket.data.user.id.toString() },
         );
       }
 
@@ -607,7 +647,9 @@ export class ChatGateway implements OnGatewayConnection {
     } catch (error) {
       if (!(error instanceof DomainError)) {
         this.logger.error(
-          `message_edit failed for user ${socket.data.user.id}: ${String(error)}`,
+          'ChatGateway',
+          `message_edit failed for user ${socket.data.user.id.toString()}`,
+          { error: String(error), userId: socket.data.user.id.toString() },
         );
       }
 
@@ -687,7 +729,9 @@ export class ChatGateway implements OnGatewayConnection {
     } catch (error) {
       if (!(error instanceof DomainError)) {
         this.logger.error(
-          `message_delete failed for user ${socket.data.user.id}: ${String(error)}`,
+          'ChatGateway',
+          `message_delete failed for user ${socket.data.user.id.toString()}`,
+          { error: String(error), userId: socket.data.user.id.toString() },
         );
       }
 
@@ -763,7 +807,9 @@ export class ChatGateway implements OnGatewayConnection {
     } catch (error) {
       if (!(error instanceof DomainError)) {
         this.logger.error(
-          `typing failed for user ${socket.data.user.id}: ${String(error)}`,
+          'ChatGateway',
+          `typing failed for user ${socket.data.user.id.toString()}`,
+          { error: String(error), userId: socket.data.user.id.toString() },
         );
       }
 
@@ -852,7 +898,9 @@ export class ChatGateway implements OnGatewayConnection {
     } catch (error) {
       if (!(error instanceof DomainError)) {
         this.logger.error(
-          `catch_up failed for user ${socket.data.user.id}: ${String(error)}`,
+          'ChatGateway',
+          `catch_up failed for user ${socket.data.user.id.toString()}`,
+          { error: String(error), userId: socket.data.user.id.toString() },
         );
       }
 
@@ -959,7 +1007,10 @@ export class ChatGateway implements OnGatewayConnection {
       await this.escalateOnViolation(socket);
       return { code: 'RATE_LIMITED', retryable: true };
     } catch (error) {
-      this.logger.error(`${policy} frame limit failed: ${String(error)}`);
+      this.logger.error('ChatGateway', `${policy} frame limit failed`, {
+        error: String(error),
+        policy,
+      });
       return { code: 'RATE_LIMITED', retryable: true };
     }
   }
@@ -1010,7 +1061,9 @@ export class ChatGateway implements OnGatewayConnection {
       }, POLICY_VIOLATION_GRACE_MS);
     } catch (error) {
       this.logger.error(
-        `violation count failed for user ${socket.data.user.id}: ${String(error)}`,
+        'ChatGateway',
+        `Violation count failed for user ${socket.data.user.id.toString()}`,
+        { error: String(error), userId: socket.data.user.id.toString() },
       );
     }
   }

@@ -1,6 +1,5 @@
 import {
   Injectable,
-  Logger,
   OnModuleInit,
   OnModuleDestroy,
   Optional,
@@ -9,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PresenceStore } from './presence-store.interface';
 import { STALE_THRESHOLD_MS } from './presence-store.interface';
 import { PRESENCE_ONLINE, PRESENCE_OFFLINE } from './presence-events';
+import { LoggerService } from '../common/logger.service';
 
 /**
  * Presence service — business logic for presence operations.
@@ -23,14 +23,17 @@ import { PRESENCE_ONLINE, PRESENCE_OFFLINE } from './presence-events';
  */
 @Injectable()
 export class PresenceService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(PresenceService.name);
+  private readonly logger: LoggerService;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly store: PresenceStore,
     private readonly events: EventEmitter2,
     @Optional() private readonly staleThresholdMs: number = STALE_THRESHOLD_MS,
-  ) {}
+    logger: LoggerService,
+  ) {
+    this.logger = logger;
+  }
 
   /**
    * Register a new connection for a user (called on authenticated WS connect).
@@ -43,7 +46,11 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
 
     // Transition 0 -> 1: user just came online
     if (previousCount === 0 && newCount === 1) {
-      this.logger.debug(`User ${userId.toString()} came online`);
+      this.logger.debug(
+        'PresenceService',
+        `User ${userId.toString()} came online`,
+        { userId: userId.toString() },
+      );
       this.events.emit(PRESENCE_ONLINE, { userId } satisfies {
         userId: bigint;
       });
@@ -61,7 +68,11 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
 
     // Transition 1 -> 0: user just went offline
     if (previousCount === 1 && newCount === 0) {
-      this.logger.debug(`User ${userId.toString()} went offline`);
+      this.logger.debug(
+        'PresenceService',
+        `User ${userId.toString()} went offline`,
+        { userId: userId.toString() },
+      );
       this.events.emit(PRESENCE_OFFLINE, { userId } satisfies {
         userId: bigint;
       });
@@ -92,13 +103,16 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
       const stale = await this.store.getStaleConnections(this.staleThresholdMs);
 
       for (const { userId, socketId } of stale) {
-        this.logger.debug(
-          `Sweeping stale connection: user=${userId.toString()}, socket=${socketId}`,
-        );
+        this.logger.debug('PresenceService', `Sweeping stale connection`, {
+          userId: userId.toString(),
+          socketId,
+        });
         await this.onDisconnect(userId, socketId);
       }
     } catch (error) {
-      this.logger.error(`Stale connection sweep failed: ${String(error)}`);
+      this.logger.error('PresenceService', 'Stale connection sweep failed', {
+        error: String(error),
+      });
     }
   }
 

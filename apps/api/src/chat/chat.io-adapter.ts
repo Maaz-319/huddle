@@ -8,6 +8,7 @@ import { SessionMiddleware } from '../auth/session.middleware';
 import { UserRepository } from '../auth/user-repository.interface';
 import type { User } from '../auth/user-repository.interface';
 import { EnvironmentVariables } from '../common/env.validation';
+import { LoggerService } from '../common/logger.service';
 import { resolveClientIp } from '../common/trust-proxy';
 import { RateLimiterService } from '../rate-limiter/rate-limiter.service';
 
@@ -86,10 +87,20 @@ export class ChatIoAdapter extends IoAdapter {
    * rate limiter, the session handler and the user repository.
    */
   private readonly nestApp: INestApplication;
+  private structuredLoggerPromise: Promise<LoggerService> | null = null;
 
   constructor(app: INestApplication) {
     super(app);
     this.nestApp = app;
+    // Use resolve() for transient-scoped providers instead of get()
+    this.structuredLoggerPromise = app.resolve(LoggerService);
+  }
+
+  private async getLogger(): Promise<LoggerService> {
+    if (!this.structuredLoggerPromise) {
+      this.structuredLoggerPromise = this.nestApp.resolve(LoggerService);
+    }
+    return this.structuredLoggerPromise;
   }
 
   override createIOServer(
@@ -160,7 +171,10 @@ export class ChatIoAdapter extends IoAdapter {
     } catch (error) {
       // A limiter outage must not open the door — refuse and let the client
       // retry, the same fail-closed stance the REST guard takes.
-      this.logger.error(`ws-connect limiter failed: ${String(error)}`);
+      const logger = await this.getLogger();
+      logger.error('ChatIoAdapter', 'ws-connect limiter failed', {
+        error: String(error),
+      });
       next(new ConnectError('Connection refused', { retryAfter: 1000 }));
     }
   }
