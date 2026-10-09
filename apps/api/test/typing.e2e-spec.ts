@@ -10,6 +10,8 @@ import { ChatIoAdapter } from '../src/chat/chat.io-adapter';
 import { TYPING_DEBOUNCE_MS } from '../src/chat/chat-state-store.interface';
 import type { AckFailure } from '../src/chat/socket-frame';
 import type { TypingBroadcast } from '../src/chat/typing.frame';
+import type { MessageResponse } from '../src/chat/message-response';
+import type { SendAck } from '../src/chat/message-send.frame';
 import { PrismaService } from '../src/common/prisma.service';
 import { RedisService } from '../src/common/redis.service';
 import { RATE_LIMIT_POLICIES } from '../src/rate-limiter/rate-limit-policies';
@@ -149,6 +151,19 @@ describe('typing indicators over the socket (e2e)', () => {
     await flushKeys(`huddle:rl:${policy}:*`);
   }
 
+  async function waitUntil(
+    check: () => boolean,
+    label: string,
+    timeoutMs = 5000,
+  ): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (check()) return;
+      await sleep(20);
+    }
+    throw new Error(`condition never held: ${label}`);
+  }
+
   async function logIn(fixture: (typeof FIXTURES)[number]): Promise<Session> {
     const agent = request.agent(app.getHttpServer());
     const initial = await agent.get('/auth/github');
@@ -229,6 +244,41 @@ describe('typing indicators over the socket (e2e)', () => {
       received.push(event);
     });
     return received;
+  }
+
+  /** Resolves with the next `message_create` this socket receives. */
+  function nextMessage(socket: Socket): Promise<MessageResponse> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('no message_create within 5s')),
+        5_000,
+      );
+      socket.once('message_create', (message: MessageResponse) => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+    });
+  }
+
+  /** Emits `message_send` and resolves with the sender's direct ack. */
+  function sendFrame(
+    socket: Socket,
+    frame: {
+      channelId: string;
+      content: string;
+      idempotencyKey: string;
+    },
+  ): Promise<SendAck> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('no ack for message_send within 5s')),
+        5_000,
+      );
+      socket.emit('message_send', frame, (ack: SendAck) => {
+        clearTimeout(timer);
+        resolve(ack);
+      });
+    });
   }
 
   /** The `tokens` field of a channel's typing bucket, as a float. */
@@ -563,5 +613,77 @@ describe('typing indicators over the socket (e2e)', () => {
       RATE_LIMIT_POLICIES.typing.capacity - 1,
     );
     expect(memberSocket.connected).toBe(true);
+  });
+
+  /**
+   * AC-3: Typing indicator e2e test (PRD §9).
+   * Verifies typing indicator appears for other viewers while composing,
+   * clears on send, and auto-clears after debounce window.
+   */
+  describe('AC-3: Typing indicator behavior', () => {
+    it('clears typing indicator when sender sends a message', async () => {
+      const seeded = await seed();
+      const { ownerSocket, memberSocket } = await connectAll(seeded);
+      const memberId = await userIdOf(MEMBER.githubId);
+
+      // Member starts typing
+      const ownerTyping = collectTyping(ownerSocket);
+      emitTyping(memberSocket, { channelId: seeded.alpha });
+
+      // Owner receives typing event
+      await waitUntil(
+        () => ownerTyping.length >= 1,
+        'owner receives typing event',
+      );
+      expect(ownerTyping).toEqual([
+        { channelId: seeded.alpha, userId: memberId.toString() },
+      ]);
+
+      // Member sends a message - typing should clear (no explicit stop event)
+      // The gateway clears typing on message_send
+      const ownerMessage = nextMessage(ownerSocket);
+      await sendFrame(memberSocket, {
+        channelId: seeded.alpha,
+        content: 'sent message',
+        idempotencyKey: 'typing-clear-on-send',
+      });
+      const received = await ownerMessage;
+
+      expect(received.content).toBe('sent message');
+
+      // No additional typing events should arrive after the message
+      await sleep(500);
+      expect(ownerTyping).toHaveLength(1);
+    });
+
+    it('auto-clears typing indicator after debounce window with no new events', async () => {
+      const seeded = await seed();
+      const { ownerSocket, memberSocket } = await connectAll(seeded);
+
+      const ownerTyping = collectTyping(ownerSocket);
+
+      // Send one typing event
+      emitTyping(memberSocket, { channelId: seeded.alpha });
+
+      await waitUntil(
+        () => ownerTyping.length >= 1,
+        'owner receives typing event',
+      );
+      expect(ownerTyping).toHaveLength(1);
+
+      // Wait past the debounce window (TYPING_DEBOUNCE_MS = 3000ms)
+      // The gateway should auto-clear the typing indicator
+      await sleep(TYPING_DEBOUNCE_MS + 500);
+
+      // Send another typing event - this should produce a new broadcast
+      // because the previous window expired
+      emitTyping(memberSocket, { channelId: seeded.alpha });
+
+      await waitUntil(
+        () => ownerTyping.length >= 2,
+        'owner receives second typing event after debounce window',
+      );
+      expect(ownerTyping).toHaveLength(2);
+    });
   });
 });

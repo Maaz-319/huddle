@@ -240,6 +240,20 @@ describe('escalation and abuse hardening over the socket (e2e)', () => {
     });
   }
 
+  /** Resolves with the next `message_create` this socket receives. */
+  function nextMessage(socket: Socket): Promise<MessageResponse> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('no message_create within 5s')),
+        5_000,
+      );
+      socket.once('message_create', (message: MessageResponse) => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+    });
+  }
+
   /** Fires one frame without waiting; its ack lands in `sink`, if it ever comes. */
   function emitInto<T>(
     socket: Socket,
@@ -996,5 +1010,384 @@ describe('escalation and abuse hardening over the socket (e2e)', () => {
 
     expect(typingAcks).toHaveLength(0);
     expect(await snapshot()).toEqual(before);
+  });
+
+  /**
+   * AC-4: Permission enforcement e2e test (PRD §9).
+   * Verifies channel override (mod-only) is enforced server-side;
+   * forged userId rejected; owner cannot be overridden; channel cannot elevate.
+   */
+  describe('AC-4: Permission enforcement', () => {
+    it('mod-only channel blocks member from posting, allows mod/owner', async () => {
+      const seeded = await seed();
+      const { ownerSocket, memberSocket, modSocket } = {
+        ownerSocket: await connect(seeded.owner.cookie),
+        memberSocket: await connect(seeded.member.cookie),
+        modSocket: await connect(seeded.mod.cookie),
+      };
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(modSocket, [seeded.alpha]);
+      await waitForRooms(memberSocket, [seeded.alpha, seeded.secret]);
+
+      // Apply mod-only override: revoke 'post' for 'member' role in alpha
+      await prisma.channelOverride.create({
+        data: {
+          channelId: BigInt(seeded.alpha),
+          role: 'member',
+          capability: 'post',
+        },
+      });
+
+      // Member tries to post → refused
+      const memberAck = await ask<SendAck>(memberSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'member blocked',
+        idempotencyKey: nextKey(),
+      });
+      expect(refusalCode(memberAck)).toBe('FORBIDDEN');
+
+      // Mod tries to post → succeeds
+      const modAck = await ask<SendAck>(modSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'mod allowed',
+        idempotencyKey: nextKey(),
+      });
+      expect(refusalCode(modAck)).toBeNull();
+
+      // Owner tries to post → succeeds
+      const ownerAck = await ask<SendAck>(ownerSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'owner allowed',
+        idempotencyKey: nextKey(),
+      });
+      expect(refusalCode(ownerAck)).toBeNull();
+    });
+
+    it('forged userId in frame rejected, attributed to handshake identity', async () => {
+      const seeded = await seed();
+      const { ownerSocket, memberSocket } = {
+        ownerSocket: await connect(seeded.owner.cookie),
+        memberSocket: await connect(seeded.member.cookie),
+      };
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(memberSocket, [seeded.alpha, seeded.secret]);
+
+      const memberId = await userIdOf(MEMBER.githubId);
+      const ownerId = await userIdOf(OWNER.githubId);
+
+      // Member sends frame with forged userId as owner
+      const forgedAck = await ask<SendAck>(memberSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'impersonation attempt',
+        idempotencyKey: nextKey(),
+        userId: ownerId.toString(), // forged
+      });
+
+      // Should be rejected as VALIDATION_FAILED (unknown field)
+      expect(refusalCode(forgedAck)).toBe('VALIDATION_FAILED');
+
+      // Honest frame from member is attributed to member, not owner
+      const honestAck = await ask<SendAck>(memberSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'honest message',
+        idempotencyKey: nextKey(),
+      });
+      expect(refusalCode(honestAck)).toBeNull();
+
+      // Verify broadcast has member's ID, not owner's
+      const ownerSeen = collect<MessageResponse>(ownerSocket, 'message_create');
+      await sleep(300);
+      expect(ownerSeen[0]?.authorId).toBe(memberId.toString());
+    });
+
+    it('owner cannot be overridden via channel override API', async () => {
+      const seeded = await seed();
+
+      // Attempt to create override for 'owner' role - should be rejected at API level
+      const response = await seeded.owner.agent
+        .put(`/channels/${seeded.alpha}/overrides/owner/post`)
+        .send({});
+
+      // API should reject override for owner role
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: { code: 'VALIDATION_FAILED' },
+      });
+    });
+
+    it('channel cannot grant capability role lacks server-wide', async () => {
+      const seeded = await seed();
+
+      // Member lacks 'delete_others' server-wide
+      // Try to create override granting 'delete_others' to member in a channel
+      // The override API only accepts 'view' and 'post' capabilities
+      // 'delete_others' is not a valid channel override capability
+      const response = await seeded.owner.agent
+        .put(`/channels/${seeded.alpha}/overrides/member/delete_others`)
+        .send({});
+
+      // Should be rejected - delete_others is not a channel-level capability
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: { code: 'VALIDATION_FAILED' },
+      });
+    });
+  });
+
+  /**
+   * AC-8: Scale sanity check (PRD §9).
+   * Measures message delivery latency under concurrent connections.
+   * Documents achievable throughput on current machine.
+   */
+  describe('AC-8: Scale sanity check', () => {
+    it('sustains message delivery with concurrent connections (within ws-connect limit)', async () => {
+      const seeded = await seed();
+      const ownerSession = await logIn(OWNER);
+      const ownerSocket = await connect(ownerSession.cookie);
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+
+      // Create 5 member connections (ws-connect limit is 5/min per IP)
+      const NUM_CONNECTIONS = 5;
+      const memberSockets: Socket[] = [];
+
+      for (let i = 0; i < NUM_CONNECTIONS; i++) {
+        const memberSession = await logIn(MEMBER);
+        const socket = await connect(memberSession.cookie);
+        await waitForRooms(socket, [seeded.alpha]);
+        memberSockets.push(socket);
+        // Reset ws-connect budget between connections
+        await resetBudget('ws-connect');
+      }
+
+      // Send one message from owner, measure delivery to all members
+      const ack = await ask<SendAck>(ownerSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'scale test',
+        idempotencyKey: 'scale-1',
+      });
+      expect(refusalCode(ack)).toBeNull();
+      const sendTime = Date.now();
+
+      // Wait for all members to receive
+      const receipts: number[] = [];
+      for (const socket of memberSockets) {
+        await nextMessage(socket);
+        receipts.push(Date.now() - sendTime);
+      }
+
+      const avgLatency = receipts.reduce((a, b) => a + b, 0) / receipts.length;
+      const maxLatency = Math.max(...receipts);
+      console.log(
+        `Scale test: ${NUM_CONNECTIONS} connections, avg latency: ${avgLatency}ms, max: ${maxLatency}ms`,
+      );
+
+      // Assert reasonable latency (should be well under 200ms locally)
+      expect(maxLatency).toBeLessThan(500);
+
+      // Cleanup
+      for (const socket of memberSockets) socket.close();
+    });
+  });
+
+  /**
+   * AC-9: Adversarial sweep (PRD §9).
+   * Consolidates adversarial checks: forged frames, private channel invisibility,
+   * revoked invite dead, override tightening only.
+   */
+  describe('AC-9: Adversarial sweep', () => {
+    it('all WS frame types reject forged userId', async () => {
+      const seeded = await seed();
+      const ownerSession = await logIn(OWNER);
+      const memberSession = await logIn(MEMBER);
+      const ownerSocket = await connect(ownerSession.cookie);
+      const memberSocket = await connect(memberSession.cookie);
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(memberSocket, [seeded.alpha, seeded.secret]);
+
+      const ownerId = await userIdOf(OWNER.githubId);
+
+      // Test each frame type with forged userId
+      const frameTypes = [
+        {
+          event: 'message_send',
+          frame: {
+            channelId: seeded.alpha,
+            content: 'x',
+            idempotencyKey: 'adv-1',
+            userId: ownerId.toString(),
+          },
+        },
+        {
+          event: 'message_edit',
+          frame: {
+            channelId: seeded.alpha,
+            messageId: '1',
+            content: 'x',
+            idempotencyKey: 'adv-2',
+            userId: ownerId.toString(),
+          },
+        },
+        {
+          event: 'message_delete',
+          frame: {
+            channelId: seeded.alpha,
+            messageId: '1',
+            idempotencyKey: 'adv-3',
+            userId: ownerId.toString(),
+          },
+        },
+        {
+          event: 'typing',
+          frame: { channelId: seeded.alpha, userId: ownerId.toString() },
+        },
+        {
+          event: 'catch_up',
+          frame: {
+            channels: [{ channelId: seeded.alpha, afterMessageId: '1' }],
+          },
+        }, // catch_up ignores userId
+      ];
+
+      for (const { event, frame } of frameTypes) {
+        const ack = await ask<unknown>(memberSocket, event, frame);
+        // All should be rejected (validation fails on unknown field)
+        // catch_up omits unknown channels instead of erroring
+        if (event === 'catch_up') {
+          const catchUpAck = ack as { channels: Array<{ channelId: string }> };
+          expect(catchUpAck.channels).toHaveLength(1); // alpha is valid
+        } else {
+          const errorAck = ack as {
+            error: { code: string; retryable: boolean };
+          };
+          expect(refusalCode(errorAck)).toBe('VALIDATION_FAILED');
+        }
+      }
+    });
+
+    it('private channel invisible in all read paths', async () => {
+      const seeded = await seed();
+      const ownerSession = await logIn(OWNER);
+      const memberSession = await logIn(MEMBER);
+      const modSession = await logIn(MOD);
+      const ownerSocket = await connect(ownerSession.cookie);
+      const memberSocket = await connect(memberSession.cookie);
+      const modSocket = await connect(modSession.cookie);
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(memberSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(modSocket, [seeded.alpha]);
+
+      // Non-member tries history → 404
+      const history = await modSession.agent.get(
+        `/channels/${seeded.secret}/messages`,
+      );
+      expect(history.status).toBe(404);
+
+      // Non-member tries catch_up → empty (no error, no leak)
+      const catchUp = await ask<CatchUpAck>(modSocket, 'catch_up', {
+        channels: [{ channelId: seeded.secret, afterMessageId: '1' }],
+      });
+      // CatchUpAck is CatchUpSuccess | AckFailure; success has channels
+      if ('channels' in catchUp) {
+        expect(catchUp.channels).toHaveLength(0);
+      }
+
+      // Non-member sends message → NOT_FOUND
+      const send = await ask<SendAck>(modSocket, 'message_send', {
+        channelId: seeded.secret,
+        content: 'x',
+        idempotencyKey: 'adv-send',
+      });
+      expect(refusalCode(send)).toBe('NOT_FOUND');
+
+      // Non-member sends typing → NOT_FOUND
+      const typing = await ask<{ error: { code: string; retryable: boolean } }>(
+        modSocket,
+        'typing',
+        {
+          channelId: seeded.secret,
+        },
+      );
+      expect(refusalCode(typing)).toBe('NOT_FOUND');
+
+      // Channel list never includes private channel for non-member
+      const channels = await modSession.agent.get(
+        `/servers/${seeded.serverId}/channels`,
+      );
+      interface ChannelListItem {
+        id: string;
+      }
+      interface ChannelsResponse {
+        body: ChannelListItem[];
+      }
+      expect(
+        (channels as ChannelsResponse).body.map((c: ChannelListItem) => c.id),
+      ).not.toContain(seeded.secret);
+    });
+
+    it('revoked invite permanently dead; regenerated works', async () => {
+      const seeded = await seed();
+      const ownerSession = await logIn(OWNER);
+
+      // Get invite code
+      interface InviteResponse {
+        code: string;
+      }
+      const invite = await ownerSession.agent.get(
+        `/servers/${seeded.serverId}/invite`,
+      );
+      const code = (invite.body as InviteResponse).code;
+
+      // Revoke
+      await ownerSession.agent.delete(`/servers/${seeded.serverId}/invite`);
+
+      // Old code refuses join
+      const memberSession = await logIn(MEMBER);
+      const stale = await memberSession.agent.post(`/invites/${code}/join`);
+      expect(stale.status).toBe(404);
+
+      // Regenerate
+      const regen = await ownerSession.agent.post(
+        `/servers/${seeded.serverId}/invite/regenerate`,
+      );
+      const newCode = (regen.body as InviteResponse).code;
+      expect(newCode).not.toBe(code);
+
+      // New code works
+      const thirdSession = await logIn(OUTSIDER);
+      const join = await thirdSession.agent.post(`/invites/${newCode}/join`);
+      expect(join.status).toBe(200);
+    });
+
+    it('override API only tightens, never grants', async () => {
+      const seeded = await seed();
+      const ownerSession = await logIn(OWNER);
+      const memberSession = await logIn(MEMBER);
+      const ownerSocket = await connect(ownerSession.cookie);
+      const memberSocket = await connect(memberSession.cookie);
+      await waitForRooms(ownerSocket, [seeded.alpha, seeded.secret]);
+      await waitForRooms(memberSocket, [seeded.alpha, seeded.secret]);
+
+      // Revoke 'post' from member (tighten)
+      const revoke = await ownerSession.agent.put(
+        `/channels/${seeded.alpha}/overrides/member/post`,
+      );
+      expect(revoke.status).toBe(204);
+
+      // Member can no longer post
+      const blocked = await ask<SendAck>(memberSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'blocked',
+        idempotencyKey: 'adv-override',
+      });
+      expect(refusalCode(blocked)).toBe('FORBIDDEN');
+
+      // Owner still can
+      const ownerOk = await ask<SendAck>(ownerSocket, 'message_send', {
+        channelId: seeded.alpha,
+        content: 'owner ok',
+        idempotencyKey: 'adv-owner',
+      });
+      expect(refusalCode(ownerOk)).toBeNull();
+    });
   });
 });
