@@ -29,6 +29,8 @@ import type {
 } from './chat.io-adapter';
 import { ChatService } from './chat.service';
 import { ChatStateStore, VIOLATION_LIMIT } from './chat-state-store.interface';
+import { PresenceService } from '../presence/presence.service';
+import { PRESENCE_ONLINE, PRESENCE_OFFLINE } from '../presence/presence-events';
 import {
   CatchUpAck,
   CatchUpChannelResponse,
@@ -115,6 +117,7 @@ export class ChatGateway implements OnGatewayConnection {
     private readonly state: ChatStateStore,
     private readonly rateLimiter: RateLimiterService,
     private readonly snowflakes: SnowflakeService,
+    private readonly presence: PresenceService,
   ) {}
 
   /**
@@ -135,6 +138,19 @@ export class ChatGateway implements OnGatewayConnection {
       for (const channel of channels) {
         await socket.join(channel.id.toString());
       }
+
+      // Register presence and set up heartbeat/disconnect listeners
+      await this.presence.onConnect(socket.data.user.id, socket.id);
+
+      // Clean disconnect: socket closed gracefully (tab close, etc.)
+      socket.on('disconnect', async () => {
+        await this.presence.onDisconnect(socket.data.user.id, socket.id);
+      });
+
+      // Heartbeat: socket.io pong received
+      socket.on('pong', async () => {
+        await this.presence.onHeartbeat(socket.data.user.id, socket.id);
+      });
     } catch (error) {
       this.logger.error(
         `room subscription failed for user ${socket.data.user.id}: ${String(error)}`,
@@ -196,6 +212,89 @@ export class ChatGateway implements OnGatewayConnection {
     }
 
     await Promise.all([...userIds].map((userId) => this.reconcileUser(userId)));
+  }
+
+  /**
+   * A user came online — broadcast to all connected users who share at
+   * least one server with them (presence-module.md section 5).
+   */
+  @OnEvent(PRESENCE_ONLINE)
+  async onPresenceOnline(payload: { userId: bigint }): Promise<void> {
+    const recipients = await this.getConnectedUsersSharingServer(
+      payload.userId,
+    );
+    if (recipients.length === 0) return;
+
+    this.logger.debug(
+      `Broadcasting presence_online for user ${payload.userId.toString()} to ${recipients.length} user(s)`,
+    );
+
+    for (const recipientId of recipients) {
+      this.server.to(recipientId.toString()).emit('presence_online', {
+        userId: payload.userId.toString(),
+      });
+    }
+  }
+
+  /**
+   * A user went offline — broadcast to all connected users who share at
+   * least one server with them (presence-module.md section 5).
+   */
+  @OnEvent(PRESENCE_OFFLINE)
+  async onPresenceOffline(payload: { userId: bigint }): Promise<void> {
+    const recipients = await this.getConnectedUsersSharingServer(
+      payload.userId,
+    );
+    if (recipients.length === 0) return;
+
+    this.logger.debug(
+      `Broadcasting presence_offline for user ${payload.userId.toString()} to ${recipients.length} user(s)`,
+    );
+
+    for (const recipientId of recipients) {
+      this.server.to(recipientId.toString()).emit('presence_offline', {
+        userId: payload.userId.toString(),
+      });
+    }
+  }
+
+  /**
+   * Find all currently connected user IDs that share at least one server
+   * with the given user. Used for presence broadcast audience.
+   */
+  private async getConnectedUsersSharingServer(
+    userId: bigint,
+  ): Promise<bigint[]> {
+    // Get all connected user IDs
+    const connectedUserIds = new Set<bigint>();
+    for (const socket of this.server.sockets.sockets.values()) {
+      connectedUserIds.add(socket.data.user.id);
+    }
+
+    // Get the target user's server IDs
+    const targetUserServers =
+      await this.administration.getUserServerIds(userId);
+    const targetServerIds = new Set(
+      targetUserServers.map((server) => server.id),
+    );
+
+    // Filter connected users to those sharing at least one server
+    const recipients: bigint[] = [];
+    for (const connectedUserId of connectedUserIds) {
+      if (connectedUserId === userId) continue; // Don't notify self
+
+      const userServers =
+        await this.administration.getUserServerIds(connectedUserId);
+      const sharesServer = userServers.some((server) =>
+        targetServerIds.has(server.id),
+      );
+
+      if (sharesServer) {
+        recipients.push(connectedUserId);
+      }
+    }
+
+    return recipients;
   }
 
   /**
