@@ -4,10 +4,10 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { DomainError, ErrorResponseBody, RateLimitedError } from './errors';
+import { LoggerService } from './logger.service';
 
 /**
  * Codes for Nest's own `HttpException`s, which arrive here from the router
@@ -37,9 +37,14 @@ const HTTP_STATUS_CODES: Record<number, string> = {
  */
 @Catch()
 export class DomainExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(DomainExceptionFilter.name);
+  private readonly logger: LoggerService;
 
-  constructor(private readonly adapterHost: HttpAdapterHost) {}
+  constructor(
+    private readonly adapterHost: HttpAdapterHost,
+    logger: LoggerService,
+  ) {
+    this.logger = logger;
+  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const { httpAdapter } = this.adapterHost;
@@ -81,10 +86,9 @@ export class DomainExceptionFilter implements ExceptionFilter {
     // The real error goes to the log; the client gets none of it, because an
     // unexpected error's message routinely carries a connection string, a
     // query, or a file path.
-    this.logger.error(
-      'Unhandled exception',
-      exception instanceof Error ? exception.stack : String(exception),
-    );
+    this.logger.error('DomainExceptionFilter', 'Unhandled exception', {
+      error: exception instanceof Error ? exception.stack : String(exception),
+    });
 
     httpAdapter.reply(
       response,

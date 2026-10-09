@@ -8,6 +8,7 @@ import {
   VIOLATION_WINDOW_MS,
 } from '../src/chat/chat-state-store.interface';
 import { RedisService } from '../src/common/redis.service';
+import { LoggerService } from '../src/common/logger.service';
 import {
   CHAT_STATE_CONTRACT_KEY_PREFIX,
   CHAT_STATE_CONTRACT_TYPING_PATTERN,
@@ -51,10 +52,24 @@ describe('RedisChatStateStore', () => {
   let store: ChatStateStore;
 
   beforeAll(async () => {
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     module = await Test.createTestingModule({
       providers: [
         RedisService,
         { provide: ConfigService, useValue: { get: () => REDIS_URL } },
+        { provide: LoggerService, useValue: mockLogger },
         { provide: ChatStateStore, useClass: RedisChatStateStore },
       ],
     }).compile();

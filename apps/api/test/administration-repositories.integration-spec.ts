@@ -17,6 +17,7 @@ import { MembershipRepository } from '../src/administration/membership-repositor
 import { ServerRepository } from '../src/administration/server-repository.interface';
 import { ConflictError } from '../src/common/errors';
 import { PrismaService } from '../src/common/prisma.service';
+import { LoggerService } from '../src/common/logger.service';
 import { SnowflakeService } from '../src/common/snowflake.service';
 import {
   CHANNEL_MEMBER_OTHER_ID,
@@ -92,10 +93,24 @@ describe('the administration Prisma adapters', () => {
   let channelOverrides: ChannelOverrideRepository;
 
   beforeAll(async () => {
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     module = await Test.createTestingModule({
       providers: [
         PrismaService,
         SnowflakeService,
+        { provide: LoggerService, useValue: mockLogger },
         // Never DATABASE_URL: these cases TRUNCATE, so they must be
         // incapable of reaching the development database.
         { provide: ConfigService, useValue: { get: () => TEST_DATABASE_URL } },

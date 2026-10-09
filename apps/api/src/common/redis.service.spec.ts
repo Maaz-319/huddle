@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { RedisOptions } from 'ioredis';
 import { RedisService } from './redis.service';
+import { LoggerService } from './logger.service';
 
 /** Arguments every construction of the ioredis client was given. */
 const mockConstructorCalls: [string, RedisOptions][] = [];
@@ -39,8 +40,25 @@ describe('RedisService', () => {
     mockConstructorCalls.length = 0;
     get.mockClear();
 
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [RedisService, { provide: ConfigService, useValue: { get } }],
+      providers: [
+        RedisService,
+        { provide: ConfigService, useValue: { get } },
+        { provide: LoggerService, useValue: mockLogger },
+      ],
     }).compile();
 
     service = module.get(RedisService);

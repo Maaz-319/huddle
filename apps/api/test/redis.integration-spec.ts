@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RedisService } from '../src/common/redis.service';
+import { LoggerService } from '../src/common/logger.service';
 
 /**
  * RedisService against the real Docker Redis.
@@ -20,10 +21,24 @@ describe('RedisService against a real Redis', () => {
   let redis: RedisService;
 
   const build = async (): Promise<RedisService> => {
+    const mockLogger = {
+      error: jest.fn(),
+      log: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+      info: jest.fn(),
+      trace: jest.fn(),
+      fatal: jest.fn(),
+      setCorrelationId: jest.fn(),
+      clearCorrelationId: jest.fn(),
+      child: jest.fn(),
+    } as unknown as LoggerService;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RedisService,
         { provide: ConfigService, useValue: { get: () => REDIS_URL } },
+        { provide: LoggerService, useValue: mockLogger },
       ],
     }).compile();
 

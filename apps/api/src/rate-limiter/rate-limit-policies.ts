@@ -8,6 +8,10 @@
  *
  * This file is now the live source for those numbers; the doc's table records
  * the reasoning behind them.
+ *
+ * **Note (Phase 10):** Current values are baselines from initial design.
+ * Per issue #94, these should be retuned based on scale test (#92) observations
+ * when those results are available.
  */
 
 /**
