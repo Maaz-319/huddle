@@ -10,4 +10,5 @@ import { patchBigIntSerialization } from '../src/common/bigint-serialization';
 patchBigIntSerialization();
 
 // Increase max listeners to avoid MaxListenersExceededWarning from supertest/socket.io
-EventEmitter.defaultMaxListeners = 20;
+// Multiple test files create socket.io clients; each adds connect listeners to MockHttpSocket
+EventEmitter.defaultMaxListeners = 100;

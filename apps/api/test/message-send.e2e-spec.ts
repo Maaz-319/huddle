@@ -681,4 +681,53 @@ describe('sending a message over the socket (e2e)', () => {
     const received = await receives;
     expect(received).toEqual(posted.body as MessageResponse);
   });
+
+  /**
+   * AC-1: Real-time message delivery < 200ms (PRD §9).
+   * Measures end-to-end latency from sender's ack to receiver's message_create.
+   * Runs 10 iterations and asserts p95 < 200ms.
+   */
+  describe('AC-1: Real-time message delivery latency', () => {
+    const ITERATIONS = 10;
+    const LATENCY_THRESHOLD_MS = 200;
+
+    it(`delivers messages in < ${LATENCY_THRESHOLD_MS}ms (p95 over ${ITERATIONS} runs)`, async () => {
+      const seeded = await seed();
+      const { ownerSocket, memberSocket } = await connectAll(seeded);
+      const latencies: number[] = [];
+
+      for (let i = 0; i < ITERATIONS; i++) {
+        const ownerReceives = nextMessage(ownerSocket);
+
+        const ack = await sendFrame(memberSocket, {
+          channelId: seeded.alpha,
+          content: `latency test ${i}`,
+          idempotencyKey: `latency-${i}`,
+        });
+        const ackTime = Date.now();
+
+        requireSuccess(ack);
+
+        await ownerReceives;
+        const receiveTime = Date.now();
+
+        const latency = receiveTime - ackTime;
+        latencies.push(latency);
+
+        // Reset rate limit budget between iterations to avoid hitting capacity
+        await resetBudget('message-send');
+      }
+
+      const sorted = [...latencies].sort((a, b) => a - b);
+      const p95Index = Math.ceil(ITERATIONS * 0.95) - 1;
+      const p95 = sorted[p95Index];
+
+      console.log(`Message delivery latencies (ms): ${latencies.join(', ')}`);
+      console.log(
+        `p50: ${sorted[Math.floor(ITERATIONS / 2)]}ms, p95: ${p95}ms, p99: ${sorted[ITERATIONS - 1]}ms`,
+      );
+
+      expect(p95).toBeLessThan(LATENCY_THRESHOLD_MS);
+    });
+  });
 });

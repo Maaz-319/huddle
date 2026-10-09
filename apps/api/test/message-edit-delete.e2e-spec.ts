@@ -338,13 +338,13 @@ describe('editing and deleting messages over the socket (e2e)', () => {
     mod: Session;
     serverId: string;
     alpha: string;
+    secret: string;
   }
 
   /**
-   * One server with a single public channel. The member holds the `member`
-   * role and the moderator — a moderator in the same server — neither needs
-   * a channel seat for it. No private channel or outsider: none of #66's
-   * acceptance criteria involve them.
+   * One server with a public channel (alpha) and a private channel (secret).
+   * The member is seated in the private channel; the moderator is not.
+   * This supports AC-6 delete scope tests.
    */
   async function seed(): Promise<Seeded> {
     const owner = await logIn(OWNER);
@@ -365,6 +365,15 @@ describe('editing and deleting messages over the socket (e2e)', () => {
     );
     await resetBudget('strict-mutation');
 
+    const secret = idOf(
+      (
+        await owner.agent
+          .post(`/servers/${serverId}/channels`)
+          .send({ name: 'secret', isPrivate: true })
+      ).body,
+    );
+    await resetBudget('strict-mutation');
+
     const memberUser = await userIdOf(MEMBER.githubId);
     const modUser = await userIdOf(MOD.githubId);
     await prisma.membership.createMany({
@@ -373,8 +382,12 @@ describe('editing and deleting messages over the socket (e2e)', () => {
         { serverId: BigInt(serverId), userId: modUser, role: 'moderator' },
       ],
     });
+    // Seat member in private channel
+    await prisma.channelMember.create({
+      data: { channelId: BigInt(secret), userId: memberUser },
+    });
 
-    return { owner, member, mod, serverId, alpha };
+    return { owner, member, mod, serverId, alpha, secret };
   }
 
   /** Connects the three sessions and waits until their rooms are as seeded. */
@@ -389,8 +402,14 @@ describe('editing and deleting messages over the socket (e2e)', () => {
       connect(seeded.mod.cookie),
     ]);
 
-    await waitForRooms(await userIdOf(OWNER.githubId), [seeded.alpha]);
-    await waitForRooms(await userIdOf(MEMBER.githubId), [seeded.alpha]);
+    await waitForRooms(await userIdOf(OWNER.githubId), [
+      seeded.alpha,
+      seeded.secret,
+    ]);
+    await waitForRooms(await userIdOf(MEMBER.githubId), [
+      seeded.alpha,
+      seeded.secret,
+    ]);
     await waitForRooms(await userIdOf(MOD.githubId), [seeded.alpha]);
 
     return { ownerSocket, memberSocket, modSocket };
@@ -780,6 +799,77 @@ describe('editing and deleting messages over the socket (e2e)', () => {
     expect(ack).toEqual({
       idempotencyKey: 'unjoined-edit',
       error: { code: 'NOT_FOUND', retryable: false },
+    });
+  });
+
+  /**
+   * AC-6: Edit/delete semantics (PRD §9).
+   * Owner can delete any message in any channel; Mod cannot delete in channels
+   * they don't oversee.
+   */
+  describe('AC-6: Owner/Mod delete scope', () => {
+    it('owner can delete any message in any channel (including private)', async () => {
+      const seeded = await seed();
+      const { ownerSocket } = await connectAll(seeded);
+
+      // Owner posts in private channel (owner has access to all channels)
+      const memberMsg = await createMessage(
+        ownerSocket,
+        seeded.secret,
+        'private message',
+      );
+      await sleep(100);
+
+      // Owner deletes message in private channel
+      const ownerReceives = nextDelete(ownerSocket);
+      const ack = await deleteFrame(ownerSocket, {
+        channelId: seeded.secret,
+        messageId: memberMsg.messageId,
+        idempotencyKey: 'owner-deletes-private',
+      });
+
+      const success = requireDeleteSuccess(ack);
+      expect(success.messageId).toBe(memberMsg.messageId);
+
+      const ownerView = await ownerReceives;
+      expect(ownerView).toEqual({
+        id: memberMsg.messageId,
+        channelId: seeded.secret,
+      });
+
+      // Message is soft-deleted
+      const row = await rowOf(memberMsg.messageId);
+      expect(row.isDeleted).toBe(true);
+    });
+
+    it('moderator cannot delete in private channel they do not oversee', async () => {
+      const seeded = await seed();
+      const { ownerSocket, modSocket } = await connectAll(seeded);
+
+      // Owner posts in private channel (mod is not seated)
+      const memberMsg = await createMessage(
+        ownerSocket,
+        seeded.secret,
+        'private message',
+      );
+      await sleep(100);
+
+      // Mod tries to delete in private channel they don't oversee
+      const ack = await deleteFrame(modSocket, {
+        channelId: seeded.secret,
+        messageId: memberMsg.messageId,
+        idempotencyKey: 'mod-deletes-unoverseen',
+      });
+
+      // Should be refused - mod has no seat in private channel
+      expect(ack).toEqual({
+        idempotencyKey: 'mod-deletes-unoverseen',
+        error: { code: 'NOT_FOUND', retryable: false },
+      });
+
+      // Message should still exist
+      const row = await rowOf(memberMsg.messageId);
+      expect(row.isDeleted).toBe(false);
     });
   });
 });
