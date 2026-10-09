@@ -230,9 +230,12 @@ export class ChatGateway implements OnGatewayConnection {
     );
 
     for (const recipientId of recipients) {
-      this.server.to(recipientId.toString()).emit('presence_online', {
-        userId: payload.userId.toString(),
-      });
+      const socketIds = this.getSocketIdsForUser(recipientId);
+      for (const socketId of socketIds) {
+        this.reachSocket(socketId).emit('presence_online', {
+          userId: payload.userId.toString(),
+        });
+      }
     }
   }
 
@@ -252,10 +255,26 @@ export class ChatGateway implements OnGatewayConnection {
     );
 
     for (const recipientId of recipients) {
-      this.server.to(recipientId.toString()).emit('presence_offline', {
-        userId: payload.userId.toString(),
-      });
+      const socketIds = this.getSocketIdsForUser(recipientId);
+      for (const socketId of socketIds) {
+        this.reachSocket(socketId).emit('presence_offline', {
+          userId: payload.userId.toString(),
+        });
+      }
     }
+  }
+
+  /**
+   * Get all socket IDs for a given user ID.
+   */
+  private getSocketIdsForUser(userId: bigint): string[] {
+    const socketIds: string[] = [];
+    for (const socket of this.server.sockets.sockets.values()) {
+      if (socket.data.user.id === userId) {
+        socketIds.push(socket.id);
+      }
+    }
+    return socketIds;
   }
 
   /**
@@ -272,8 +291,17 @@ export class ChatGateway implements OnGatewayConnection {
     }
 
     // Get the target user's server IDs
-    const targetUserServers =
-      await this.administration.getUserServerIds(userId);
+    let targetUserServers: { id: bigint }[];
+    try {
+      targetUserServers = await this.administration.getUserServerIds(userId);
+    } catch (error) {
+      // If the user's servers were deleted (e.g., during test cleanup),
+      // they have no shared servers with anyone
+      this.logger.warn(
+        `Failed to get servers for user ${userId.toString()}: ${String(error)}`,
+      );
+      return [];
+    }
     const targetServerIds = new Set(
       targetUserServers.map((server) => server.id),
     );
@@ -283,8 +311,17 @@ export class ChatGateway implements OnGatewayConnection {
     for (const connectedUserId of connectedUserIds) {
       if (connectedUserId === userId) continue; // Don't notify self
 
-      const userServers =
-        await this.administration.getUserServerIds(connectedUserId);
+      let userServers: { id: bigint }[];
+      try {
+        userServers =
+          await this.administration.getUserServerIds(connectedUserId);
+      } catch (error) {
+        // Skip users whose servers were deleted
+        this.logger.warn(
+          `Failed to get servers for user ${connectedUserId.toString()}: ${String(error)}`,
+        );
+        continue;
+      }
       const sharesServer = userServers.some((server) =>
         targetServerIds.has(server.id),
       );
