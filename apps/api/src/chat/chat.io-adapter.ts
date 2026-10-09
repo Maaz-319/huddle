@@ -99,7 +99,20 @@ export class ChatIoAdapter extends IoAdapter {
     // socket.io's `createIOServer` is typed `any` upstream — the one
     // untyped third-party boundary this file crosses, asserted to the
     // concrete Server type it actually returns.
-    const server = super.createIOServer(port, options) as AuthenticatedServer;
+    //
+    // Ping interval 10s + timeout 20s = ~30s worst-case dead-connection
+    // detection, matching presence-module.md section 3 and FR-23.
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const serverOptions = {
+      pingInterval: 10_000,
+      pingTimeout: 20_000,
+      ...(options ?? {}),
+    } as ServerOptions;
+    const server = super.createIOServer(
+      port,
+      serverOptions,
+    ) as AuthenticatedServer;
 
     const config = this.nestApp.get(ConfigService<EnvironmentVariables, true>, {
       strict: false,

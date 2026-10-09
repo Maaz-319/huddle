@@ -3,6 +3,7 @@ import { AdministrationModule } from '../administration/administration.module';
 import { AuthModule } from '../auth/auth.module';
 import { RequireCapabilityGuard } from '../auth/require-capability.guard';
 import { RateLimiterModule } from '../rate-limiter/rate-limiter.module';
+import { PresenceModule } from '../presence/presence.module';
 import { PrismaMessageRepository } from './adapters/prisma-message-repository.adapter';
 import { RedisChatStateStore } from './adapters/redis-chat-state-store.adapter';
 import { ChatGateway } from './chat.gateway';
@@ -40,12 +41,21 @@ import { MessageRepository } from './message-repository.interface';
  * same `RateLimiterService` the REST guards use, so both transports spend
  * from one bucket.
  *
+ * `PresenceModule` is imported for `PresenceService` — the gateway registers
+ * connections, handles heartbeats, and listens for online/offline events to
+ * broadcast presence changes.
+ *
  * The guard is then listed below for the same reason `AdministrationModule`
  * lists it: so the wiring is a declaration rather than something that happens
  * to work.
  */
 @Module({
-  imports: [AuthModule, AdministrationModule, RateLimiterModule],
+  imports: [
+    AuthModule,
+    AdministrationModule,
+    RateLimiterModule,
+    PresenceModule,
+  ],
   controllers: [MessageController],
   providers: [
     { provide: MessageRepository, useClass: PrismaMessageRepository },
@@ -58,7 +68,7 @@ import { MessageRepository } from './message-repository.interface';
     // frame handlers (`message_send` #65, `message_edit`/`message_delete`
     // #66) ack the sender and broadcast. It injects
     // `AdministrationService`, `ChatService`, `ChatStateStore`,
-    // `RateLimiterService` and `SnowflakeService`.
+    // `RateLimiterService`, `SnowflakeService`, and `PresenceService`.
     ChatGateway,
     RequireCapabilityGuard,
   ],

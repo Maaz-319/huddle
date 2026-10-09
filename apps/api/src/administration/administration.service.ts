@@ -124,6 +124,15 @@ export class AdministrationService {
   }
 
   /**
+   * All servers a user is a member of — same as `listMyServers` but
+   * accepts any userId (not just the caller). Used by the gateway to
+   * compute presence broadcast audience (users sharing a server).
+   */
+  async getUserServerIds(userId: bigint): Promise<Server[]> {
+    return this.listMyServers(userId);
+  }
+
+  /**
    * One server's details. Throws `NotFoundError` if the caller is not a
    * member — servers are not publicly readable, so a non-member learns
    * nothing about whether the id even exists (404, never 403).
