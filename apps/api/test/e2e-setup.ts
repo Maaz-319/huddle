@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { patchBigIntSerialization } from '../src/common/bigint-serialization';
 
 /**
@@ -7,3 +8,6 @@ import { patchBigIntSerialization } from '../src/common/bigint-serialization';
  * Snowflake would throw a TypeError here but not in production.
  */
 patchBigIntSerialization();
+
+// Increase max listeners to avoid MaxListenersExceededWarning from supertest/socket.io
+EventEmitter.defaultMaxListeners = 20;

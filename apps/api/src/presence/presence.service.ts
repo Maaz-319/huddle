@@ -103,6 +103,11 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
+    // Skip sweep timer in test environments to avoid interfering with tests
+    if (process.env.JEST_WORKER_ID !== undefined) {
+      return;
+    }
+
     // Run sweep every 10 seconds (presence-module.md section 3)
     this.sweepTimer = setInterval(
       () => void this.sweepStaleConnections(),

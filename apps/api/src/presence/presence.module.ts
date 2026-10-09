@@ -3,6 +3,7 @@ import { CommonModule } from '../common/common.module';
 import { PresenceStore } from './presence-store.interface';
 import { RedisPresenceStore } from './adapters/redis-presence-store.adapter';
 import { PresenceService } from './presence.service';
+import { PresenceController } from './presence.controller';
 
 /**
  * Presence module — live connection registry, heartbeat, online/offline state.
@@ -16,6 +17,7 @@ import { PresenceService } from './presence.service';
  */
 @Module({
   imports: [CommonModule],
+  controllers: [PresenceController],
   providers: [
     { provide: PresenceStore, useClass: RedisPresenceStore },
     PresenceService,

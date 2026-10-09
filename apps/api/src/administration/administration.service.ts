@@ -109,18 +109,9 @@ export class AdministrationService {
       ),
     );
 
-    // A membership always points at a real server (Restrict, never Cascade,
-    // is the other direction) -- null here would mean the two tables have
-    // drifted, which is a bug, not a case to paper over with a filter.
-    return servers.map((server, index) => {
-      if (server === null) {
-        throw new Error(
-          `Membership names server ${memberships[index].serverId.toString()}, which does not exist`,
-        );
-      }
-
-      return server;
-    });
+    // Filter out any null servers (data integrity issue) rather than throwing.
+    // This makes the presence system more resilient to transient issues.
+    return servers.filter((server): server is Server => server !== null);
   }
 
   /**

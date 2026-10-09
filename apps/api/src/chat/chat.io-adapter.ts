@@ -103,7 +103,6 @@ export class ChatIoAdapter extends IoAdapter {
     // Ping interval 10s + timeout 20s = ~30s worst-case dead-connection
     // detection, matching presence-module.md section 3 and FR-23.
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serverOptions = {
       pingInterval: 10_000,
       pingTimeout: 20_000,
