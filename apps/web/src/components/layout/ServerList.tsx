@@ -17,6 +17,7 @@ import { DialogRoot as Dialog, DialogContent, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
+import { InviteDialog } from '@/components/servers/InviteDialog';
 
 interface Server {
   id: string;
@@ -54,6 +55,8 @@ export function ServerList() {
   const [createIconUrl, setCreateIconUrl] = useState('');
   const [creating, setCreating] = useState(false);
   const [contextMenuServer, setContextMenuServer] = useState<Server | null>(null);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [inviteDialogServerId, setInviteDialogServerId] = useState<string | null>(null);
 
   const handleCreateServer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,14 +88,14 @@ export function ServerList() {
     setContextMenuServer(null);
   };
 
-  const handleInviteClick = async (serverId: string) => {
-    try {
-      const invite = await useServerStore.getState().getInvite(serverId);
-      navigator.clipboard.writeText(`${import.meta.env.VITE_WEB_ORIGIN ?? 'http://localhost:5173'}/invite/${invite.code}`);
-      toast.success('Invite link copied to clipboard');
-    } catch (error) {
-      toast.error('Failed to get invite', error instanceof Error ? error.message : 'Unknown error');
-    }
+  const handleInviteClick = (serverId: string) => {
+    setInviteDialogServerId(serverId);
+    setShowInviteDialog(true);
+    setContextMenuServer(null);
+  };
+
+  const handleSettingsClick = (serverId: string) => {
+    navigate({ to: `/app/${serverId}/settings` });
     setContextMenuServer(null);
   };
 
@@ -286,6 +289,12 @@ export function ServerList() {
         </DialogContent>
       </Dialog>
 
+      <InviteDialog 
+        open={showInviteDialog} 
+        onOpenChange={setShowInviteDialog} 
+        serverId={inviteDialogServerId ?? ''} 
+      />
+
       {contextMenuServer && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -301,7 +310,7 @@ export function ServerList() {
               <ExternalLink className="h-4 w-4 mr-2" />
               Invite People
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate({ to: `/app/${contextMenuServer.id}/settings` })}>
+            <DropdownMenuItem onClick={() => handleSettingsClick(contextMenuServer.id)}>
               <Settings className="h-4 w-4 mr-2" />
               Server Settings
             </DropdownMenuItem>
