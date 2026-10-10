@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { useSocketStore } from '@/stores/socketStore';
+import { usePresenceStore } from '@/stores/presenceStore';
 import type { SocketStatus, ServerEventMap, ServerEventType, ClientEventType, ClientEventMap, AckResponseMap } from '@/types/socket';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -103,6 +104,15 @@ function setupSocketListeners(socket: Socket): void {
       }
     });
   }
+
+  // Register presence handlers to update presence store
+  socket.on('presence_online', (payload: { userId: string }) => {
+    usePresenceStore.getState().setOnline(payload.userId);
+  });
+
+  socket.on('presence_offline', (payload: { userId: string }) => {
+    usePresenceStore.getState().setOffline(payload.userId);
+  });
 }
 
 export function connectSocket(): Socket {

@@ -17,3 +17,9 @@ export interface ChannelMemberResponse {
   userId: string;
   addedAt: string;
 }
+
+export interface ServerMemberResponse {
+  userId: string;
+  role: 'owner' | 'moderator' | 'member';
+  joinedAt: string;
+}

@@ -5,9 +5,9 @@ import { LandingPage } from '@/components/auth/LandingPage'
 import { AuthCallback } from '@/components/auth/AuthCallback'
 import { AppShell } from '@/components/layout/AppShell'
 import { ServerView } from '@/components/layout/ServerView'
-import { ChannelView } from '@/components/layout/ChannelView'
 import { ServerSettings } from '@/components/layout/ServerSettings'
 import { InvitePreviewPage } from '@/components/invite/InvitePreviewPage'
+import { MessagePane } from '@/components/chat/MessagePane'
 
 // Type-safe router context
 interface RouterContext {
@@ -66,7 +66,7 @@ const serverRoute = createRoute({
 const channelRoute = createRoute({
   getParentRoute: () => serverRoute,
   path: '/$channelId',
-  component: () => <ChannelView />,
+  component: () => <MessagePane />,
 })
 
 // Server settings - /app/@serverId/settings

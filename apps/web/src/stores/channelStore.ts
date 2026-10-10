@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { apiClient } from '@/api/client';
-import type { ChannelResponse, ChannelOverrideResponse, ChannelMemberResponse } from '@/types/channel';
+import type { ChannelResponse, ChannelOverrideResponse, ChannelMemberResponse, ServerMemberResponse } from '@/types/channel';
 
 interface ChannelStore {
   channelsByServer: Map<string, ChannelResponse[]>;
@@ -15,6 +15,7 @@ interface ChannelStore {
   getChannel: (channelId: string) => Promise<ChannelResponse>;
   listOverrides: (channelId: string) => Promise<ChannelOverrideResponse[]>;
   listChannelMembers: (channelId: string) => Promise<ChannelMemberResponse[]>;
+  listServerMembers: (serverId: string) => Promise<ServerMemberResponse[]>;
   revokeCapability: (channelId: string, role: string, capability: string) => Promise<void>;
   restoreCapability: (channelId: string, role: string, capability: string) => Promise<void>;
   addChannelMember: (channelId: string, userId: string) => Promise<ChannelMemberResponse>;
@@ -89,6 +90,10 @@ export const useChannelStore = create<ChannelStore>((set) => ({
 
   listChannelMembers: async (channelId) => {
     return apiClient.get<ChannelMemberResponse[]>(`/channels/${channelId}/members`);
+  },
+
+  listServerMembers: async (serverId) => {
+    return apiClient.get<ServerMemberResponse[]>(`/servers/${serverId}/members`);
   },
 
   revokeCapability: async (channelId, role, capability) => {

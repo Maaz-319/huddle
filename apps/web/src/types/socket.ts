@@ -15,6 +15,9 @@ export interface MessageResponse {
     username: string;
     avatarUrl: string | null;
   };
+  // Client-side only fields for optimistic updates
+  pending?: boolean;
+  isDeleted?: boolean;
 }
 
 export interface MessageDeleteResponse {
