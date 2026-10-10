@@ -4,21 +4,26 @@ import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useMessageStore } from '@/stores/messageStore';
 import { useServerStore } from '@/stores/serverStore';
+import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { Toaster } from '@/components/ui';
 import { toast } from '@/stores/toastStore';
+import { apiClient } from '@/api/client';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
 import { MessagePane } from './MessagePane';
 import { MemberSidebar } from './MemberSidebar';
 import { BottomNav, MobileHeader } from './BottomNav';
 import { cn } from '@/components/ui/cn';
+import { useGlobalErrorHandler } from '@/hooks/useGlobalErrorHandler';
+import { ErrorBoundary, FeatureErrorFallback } from '@/components/ui';
 
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
   const { socket, status, connect, on, isConnected } = useSocket();
   const setLastMessageId = useMessageStore((s) => s.setLastMessageId);
   const { currentServerId, servers, fetchServers } = useServerStore();
+  const { currentChannelId, fetchChannels } = useChannelStore();
   const { 
     isChannelListOpen, 
     isMemberSidebarOpen,
@@ -26,6 +31,9 @@ export function AppShell() {
     closeAllDrawers
   } = useUIStore();
   const navigate = useNavigate();
+
+  // Global error handler
+  useGlobalErrorHandler();
 
   // Initialize auth hydration on mount
   useEffect(() => {
@@ -112,7 +120,12 @@ export function AppShell() {
           isMobile && isServerListOpen && 'translate-x-0 fixed inset-y-0 left-0 bg-bg-raised border-r border-border-subtle shadow-xl',
           isTablet && 'w-14'
         )}>
-          <ServerList />
+          <ErrorBoundary
+            fallback={<FeatureErrorFallback title="Servers" description="Failed to load your servers" onRetry={() => fetchServers()} />}
+            resetKeys={[currentServerId]}
+          >
+            <ServerList />
+          </ErrorBoundary>
         </div>
 
         {/* Channel List - Collapsible drawer on tablet, modal on mobile */}
@@ -123,7 +136,12 @@ export function AppShell() {
           isMobile && !isChannelListOpen && '-translate-x-full fixed inset-y-0 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
           isMobile && isChannelListOpen && 'translate-x-0 fixed inset-y-0 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
         )}>
-          <ChannelList />
+          <ErrorBoundary
+            fallback={<FeatureErrorFallback title="Channels" description="Failed to load channels" onRetry={() => currentServerId && fetchChannels(currentServerId)} />}
+            resetKeys={[currentServerId]}
+          >
+            <ChannelList />
+          </ErrorBoundary>
         </div>
 
         {/* Message Pane - Center, flex-1 */}
@@ -131,7 +149,12 @@ export function AppShell() {
           'flex-1 min-w-0 flex flex-col overflow-hidden',
           'lg:max-w-3xl lg:mx-auto lg:w-full'
         )}>
-          <MessagePane />
+          <ErrorBoundary
+            fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => currentChannelId && apiClient.get(`/channels/${currentChannelId}/messages`)} />}
+            resetKeys={[currentChannelId]}
+          >
+            <MessagePane />
+          </ErrorBoundary>
         </div>
 
         {/* Member Sidebar - Collapsible drawer on tablet, modal on mobile */}
@@ -142,7 +165,12 @@ export function AppShell() {
           isMobile && !isMemberSidebarOpen && 'translate-x-full fixed inset-y-0 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
           isMobile && isMemberSidebarOpen && 'translate-x-0 fixed inset-y-0 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
         )}>
-          <MemberSidebar />
+          <ErrorBoundary
+            fallback={<FeatureErrorFallback title="Members" description="Failed to load members" onRetry={() => currentServerId && useChannelStore.getState().listServerMembers(currentServerId)} />}
+            resetKeys={[currentServerId]}
+          >
+            <MemberSidebar />
+          </ErrorBoundary>
         </div>
       </div>
 

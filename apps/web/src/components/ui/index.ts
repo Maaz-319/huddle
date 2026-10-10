@@ -60,4 +60,6 @@ export {
 } from './tabs'
 export { RadioGroupRoot, RadioGroupItem } from './radio-group'
 export { Toaster } from './toast'
+export { ErrorBoundary } from '@/components/error/ErrorBoundary'
+export { FeatureErrorFallback } from '@/components/error/FeatureErrorFallback'
 export { toast } from '@/stores/toastStore'
