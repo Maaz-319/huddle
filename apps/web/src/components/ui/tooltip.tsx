@@ -1,26 +1,26 @@
-import * as Tooltip from '@radix-ui/react-tooltip'
+import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { cn } from './cn'
 import type { ReactNode } from 'react'
 
-export const TooltipProvider = Tooltip.Provider
+export const TooltipProvider = TooltipPrimitive.Provider
 
-export const TooltipRoot = Tooltip.Root
+export const Tooltip = TooltipPrimitive.Root
 
-export interface TooltipTriggerProps extends React.ComponentPropsWithoutRef<typeof Tooltip.Trigger> {
+export interface TooltipTriggerProps extends React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Trigger> {
   children: ReactNode
 }
 
 export function TooltipTrigger({ className, children, ...props }: TooltipTriggerProps) {
-  return <Tooltip.Trigger className={cn(className)} {...props}>{children}</Tooltip.Trigger>
+  return <TooltipPrimitive.Trigger className={cn(className)} {...props}>{children}</TooltipPrimitive.Trigger>
 }
 
-export interface TooltipContentProps extends React.ComponentPropsWithoutRef<typeof Tooltip.Content> {
+export interface TooltipContentProps extends React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content> {
   children: ReactNode
 }
 
 export function TooltipContent({ className, side = 'top', align = 'center', sideOffset = 8, children, ...props }: TooltipContentProps) {
   return (
-    <Tooltip.Content
+    <TooltipPrimitive.Content
       className={cn(
         'bg-bg-overlay border border-border-subtle rounded-md px-3 py-1.5 text-xs text-text-primary shadow-lg',
         'data-[state=delayed-open]:animate-in data-[state=closed]:animate-out',
@@ -35,7 +35,7 @@ export function TooltipContent({ className, side = 'top', align = 'center', side
       {...props}
     >
       {children}
-      <Tooltip.Arrow className="fill-bg-overlay border-border-subtle stroke-border-subtle" width={8} height={4} />
-    </Tooltip.Content>
+      <TooltipPrimitive.Arrow className="fill-bg-overlay border-border-subtle stroke-border-subtle" width={8} height={4} />
+    </TooltipPrimitive.Content>
   )
 }

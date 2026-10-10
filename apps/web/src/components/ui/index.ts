@@ -30,7 +30,7 @@ export {
 } from './dialog'
 export {
   TooltipProvider,
-  TooltipRoot,
+  Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from './tooltip'
@@ -48,6 +48,8 @@ export {
   ScrollAreaComp as ScrollArea,
 } from './scroll-area'
 export { SeparatorRoot, SeparatorComp as Separator } from './separator'
+export { Checkbox } from './checkbox'
+export { Label } from './label'
 export {
   TabsRoot,
   TabsList,

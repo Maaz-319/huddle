@@ -4,7 +4,7 @@ import { cn } from './cn'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'destructive'
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'icon'
   loading?: boolean
   asChild?: boolean
   children: ReactNode
@@ -21,6 +21,7 @@ const sizeStyles = {
   sm: 'px-3 py-1.5 text-sm gap-1.5',
   md: 'px-4 py-2 text-base gap-2',
   lg: 'px-6 py-3 text-lg gap-2.5',
+  icon: 'p-2',
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
