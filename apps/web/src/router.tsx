@@ -8,6 +8,7 @@ import { ServerView } from '@/components/layout/ServerView'
 import { ServerSettings } from '@/components/layout/ServerSettings'
 import { InvitePreviewPage } from '@/components/invite/InvitePreviewPage'
 import { MessagePane } from '@/components/chat/MessagePane'
+import { SettingsPage } from '@/components/settings/SettingsPage'
 
 // Type-safe router context
 interface RouterContext {
@@ -76,6 +77,13 @@ const serverSettingsRoute = createRoute({
   component: () => <ServerSettings />,
 })
 
+// User settings - /app/settings
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/settings',
+  component: () => <SettingsPage />,
+})
+
 // Redirect /app to first server or show empty state
 const appIndexRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -92,6 +100,7 @@ export const routeTree = rootRoute.addChildren([
   invitePreviewRoute,
   appRoute.addChildren([
     appIndexRoute,
+    settingsRoute,
     serverRoute.addChildren([channelRoute, serverSettingsRoute]),
   ])
 ])

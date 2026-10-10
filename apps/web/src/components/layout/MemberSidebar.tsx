@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/components/ui/cn';
+import { Search, X } from 'lucide-react';
 import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { authApi } from '@/api/auth';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 interface Member {
   id: string;
@@ -54,12 +58,49 @@ function getRoleBadge(role: Member['role']) {
   }
 }
 
+function MemberItem({ member }: { member: Member }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg">
+      <div className="relative">
+        {member.avatarUrl ? (
+          <img
+            src={member.avatarUrl}
+            alt=""
+            className="h-8 w-8 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
+            style={{ backgroundColor: getColorFromString(member.username) }}
+          >
+            {getInitials(member.username)}
+          </div>
+        )}
+        <span
+          className={cn(
+            'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base',
+            getStatusColor(member.isOnline)
+          )}
+        />
+      </div>
+      <div className="flex-1 min-w-0 flex items-center gap-2">
+        <span className="truncate font-medium text-sm text-text-primary">{member.username}</span>
+        {getRoleBadge(member.role)}
+      </div>
+    </div>
+  );
+}
+
+
+
 export function MemberSidebar() {
   const { currentServerId } = useServerStore();
   const { listServerMembers } = useChannelStore();
   const { isOnline, setSnapshot } = usePresenceStore();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const parentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!currentServerId) {
@@ -73,12 +114,10 @@ export function MemberSidebar() {
     async function loadMembers() {
       try {
         setLoading(true);
-        // currentServerId is guaranteed to be non-null here due to the check above
         const serverMembers = await listServerMembers(currentServerId!);
         const userIds = serverMembers.map((m) => m.userId);
         const users = await authApi.getUsers(userIds);
 
-        // Create a map for quick lookup
         const userMap = new Map(users.map((u) => [u.user.id, u.user]));
 
         const enrichedMembers: Member[] = serverMembers.map((m) => {
@@ -115,13 +154,31 @@ export function MemberSidebar() {
     };
   }, [currentServerId, listServerMembers, isOnline, setSnapshot]);
 
-  useEffect(() => {
-    if (!currentServerId) return;
+  // Filter members based on search query
+  const filteredMembers = useMemo(() => {
+    if (!searchQuery.trim()) return members;
+    const query = searchQuery.toLowerCase();
+    return members.filter((m) => m.username.toLowerCase().includes(query));
+  }, [members, searchQuery]);
 
-    return () => {
-      // Cleanup if needed
-    };
-  }, [currentServerId]);
+  // Sort: online first, then by role (owner > moderator > member)
+  const sortedMembers = useMemo(() => {
+    return [...filteredMembers].sort((a, b) => {
+      // Online first
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      // Then by role
+      const roleOrder = { owner: 0, moderator: 1, member: 2 };
+      return roleOrder[a.role] - roleOrder[b.role];
+    });
+  }, [filteredMembers]);
+
+  // Virtualizer for large member lists
+  const virtualizer = useVirtualizer({
+    count: sortedMembers.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 52,
+    overscan: 5,
+  });
 
   if (!currentServerId) {
     return (
@@ -157,14 +214,13 @@ export function MemberSidebar() {
     );
   }
 
-  const onlineMembers = members.filter((m) => m.isOnline);
-  const offlineMembers = members.filter((m) => !m.isOnline);
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  }, []);
 
-  // Sort: owner first, then moderator, then member
-  const sortByRole = (a: Member, b: Member) => {
-    const roleOrder = { owner: 0, moderator: 1, member: 2 };
-    return roleOrder[a.role] - roleOrder[b.role];
-  };
+  const handleSearchClear = useCallback(() => {
+    setSearchQuery('');
+  }, []);
 
   return (
     <div className={cn(
@@ -177,81 +233,69 @@ export function MemberSidebar() {
         <span className="text-text-muted text-xs">{members.length}</span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-1" role="navigation" aria-label="Members">
-        {onlineMembers.length > 0 && (
-          <>
-            <h3 className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Online ({onlineMembers.length})
-            </h3>
-            {onlineMembers.sort(sortByRole).map((member) => (
-              <div key={member.id} className="flex items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg">
-                <div className="relative">
-                  {member.avatarUrl ? (
-                    <img
-                      src={member.avatarUrl}
-                      alt=""
-                      className="h-8 w-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
-                      style={{ backgroundColor: getColorFromString(member.username) }}
-                    >
-                      {getInitials(member.username)}
-                    </div>
-                  )}
-                  <span
-                    className={cn(
-                      'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base',
-                      getStatusColor(member.isOnline)
-                    )}
-                  />
-                </div>
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  <span className="truncate font-medium text-sm text-text-primary">{member.username}</span>
-                  {getRoleBadge(member.role)}
-                </div>
-              </div>
-            ))}
-          </>
-        )}
-        {offlineMembers.length > 0 && (
-          <>
-            <h3 className="px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Offline ({offlineMembers.length})
-            </h3>
-            {offlineMembers.sort(sortByRole).map((member) => (
-              <div key={member.id} className="flex items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg">
-                <div className="relative">
-                  {member.avatarUrl ? (
-                    <img
-                      src={member.avatarUrl}
-                      alt=""
-                      className="h-8 w-8 rounded-full object-cover opacity-50"
-                    />
-                  ) : (
-                    <div
-                      className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm opacity-50"
-                      style={{ backgroundColor: getColorFromString(member.username) }}
-                    >
-                      {getInitials(member.username)}
-                    </div>
-                  )}
-                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base bg-gray-500" />
-                </div>
-                <div className="flex-1 min-w-0 flex items-center gap-2">
-                  <span className="truncate font-medium text-sm text-text-secondary">{member.username}</span>
-                  {getRoleBadge(member.role)}
-                </div>
-              </div>
-            ))}
-          </>
-        )}
-        {members.length === 0 && (
+      {/* Search input */}
+      <div className="px-3 py-2 border-b border-border-subtle">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+          <Input
+            type="text"
+            placeholder="Search members..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+            className="pl-9 pr-8 py-1.5 text-sm bg-bg-raised border-border-subtle"
+            aria-label="Search members"
+          />
+          {searchQuery && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+              onClick={handleSearchClear}
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Member list */}
+      <nav
+        ref={parentRef}
+        className="flex-1 overflow-y-auto px-2 py-2 space-y-1"
+        role="navigation"
+        aria-label="Members"
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {sortedMembers.length === 0 && (
           <div className="flex-1 flex items-center justify-center px-4">
-            <p className="text-text-muted text-sm">No members in this server</p>
+            <p className="text-text-muted text-sm">
+              {searchQuery ? 'No members match your search' : 'No members in this server'}
+            </p>
           </div>
         )}
+
+        {virtualizer.getVirtualItems().map((virtualRow) => (
+          <div
+            key={sortedMembers[virtualRow.index]?.id}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: `${virtualRow.size}px`,
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            {sortedMembers[virtualRow.index] && (
+              <MemberItem member={sortedMembers[virtualRow.index]} />
+            )}
+          </div>
+        ))}
       </nav>
     </div>
   );

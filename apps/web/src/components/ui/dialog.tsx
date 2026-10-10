@@ -83,3 +83,5 @@ export function DialogActions({ className, children, ...props }: DialogActionsPr
 }
 
 export const DialogClose = Dialog.Close
+export const DialogHeader = Dialog.Title
+export const DialogFooter = DialogActions
