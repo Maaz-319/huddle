@@ -16,6 +16,15 @@ async function bootstrap() {
   const config =
     app.get<ConfigService<EnvironmentVariables, true>>(ConfigService);
 
+  // CORS — allow the frontend origin with credentials for session cookies.
+  // WEB_ORIGIN defaults to http://localhost:5173 in development.
+  app.enableCors({
+    origin: config.get('WEB_ORIGIN', { infer: true }),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  });
+
   // Before the first request, so no request is ever keyed on the proxy's
   // address instead of the caller's. The WebSocket handshake reads the same
   // hop count out of config (chat.io-adapter.ts), so both transports key
