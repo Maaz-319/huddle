@@ -1,16 +1,16 @@
-import * as Tabs from '@radix-ui/react-tabs'
+import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { cn } from './cn'
 import type { ReactNode } from 'react'
 
-export const TabsRoot = Tabs.Root
+export const TabsRoot = TabsPrimitive.Root
 
-export interface TabsListProps extends React.ComponentPropsWithoutRef<typeof Tabs.List> {
+export interface TabsListProps extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> {
   children: ReactNode
 }
 
 export function TabsList({ className, children, ...props }: TabsListProps) {
   return (
-    <Tabs.List
+    <TabsPrimitive.List
       className={cn(
         'inline-flex h-10 items-center justify-center rounded-md bg-bg-raised p-1 text-text-secondary',
         className,
@@ -18,17 +18,17 @@ export function TabsList({ className, children, ...props }: TabsListProps) {
       {...props}
     >
       {children}
-    </Tabs.List>
+    </TabsPrimitive.List>
   )
 }
 
-export interface TabsTriggerProps extends React.ComponentPropsWithoutRef<typeof Tabs.Trigger> {
+export interface TabsTriggerProps extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger> {
   children: ReactNode
 }
 
 export function TabsTrigger({ className, children, ...props }: TabsTriggerProps) {
   return (
-    <Tabs.Trigger
+    <TabsPrimitive.Trigger
       className={cn(
         'inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base',
@@ -39,21 +39,23 @@ export function TabsTrigger({ className, children, ...props }: TabsTriggerProps)
       {...props}
     >
       {children}
-    </Tabs.Trigger>
+    </TabsPrimitive.Trigger>
   )
 }
 
-export interface TabsContentProps extends React.ComponentPropsWithoutRef<typeof Tabs.Content> {
+export interface TabsContentProps extends React.ComponentPropsWithoutRef<typeof TabsPrimitive.Content> {
   children: ReactNode
 }
 
 export function TabsContent({ className, children, ...props }: TabsContentProps) {
   return (
-    <Tabs.Content
+    <TabsPrimitive.Content
       className={cn('mt-2 ring-offset-bg-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus', className)}
       {...props}
     >
       {children}
-    </Tabs.Content>
+    </TabsPrimitive.Content>
   )
 }
+
+export const Tabs = TabsRoot

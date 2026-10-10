@@ -27,6 +27,8 @@ export {
   DialogDescription,
   DialogActions,
   DialogClose,
+  DialogHeader,
+  DialogFooter,
 } from './dialog'
 export {
   TooltipProvider,
@@ -56,5 +58,6 @@ export {
   TabsTrigger,
   TabsContent,
 } from './tabs'
+export { RadioGroupRoot, RadioGroupItem } from './radio-group'
 export { Toaster } from './toast'
 export { toast } from '@/stores/toastStore'
