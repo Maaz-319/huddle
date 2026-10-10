@@ -14,6 +14,7 @@ interface ChannelStore {
   deleteChannel: (channelId: string) => Promise<void>;
   getChannel: (channelId: string) => Promise<ChannelResponse>;
   listOverrides: (channelId: string) => Promise<ChannelOverrideResponse[]>;
+  listChannelMembers: (channelId: string) => Promise<ChannelMemberResponse[]>;
   revokeCapability: (channelId: string, role: string, capability: string) => Promise<void>;
   restoreCapability: (channelId: string, role: string, capability: string) => Promise<void>;
   addChannelMember: (channelId: string, userId: string) => Promise<ChannelMemberResponse>;
@@ -84,6 +85,10 @@ export const useChannelStore = create<ChannelStore>((set) => ({
 
   listOverrides: async (channelId) => {
     return apiClient.get<ChannelOverrideResponse[]>(`/channels/${channelId}/overrides`);
+  },
+
+  listChannelMembers: async (channelId) => {
+    return apiClient.get<ChannelMemberResponse[]>(`/channels/${channelId}/members`);
   },
 
   revokeCapability: async (channelId, role, capability) => {

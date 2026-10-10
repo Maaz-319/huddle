@@ -19,6 +19,8 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
 import { useState } from 'react';
+import { MemberManagementDrawer } from '@/components/channels/MemberManagementDrawer';
+import { OverridesDrawer } from '@/components/channels/OverridesDrawer';
 
 interface Channel {
   id: string;
@@ -42,6 +44,8 @@ export function ChannelList() {
   const [editName, setEditName] = useState('');
   const [editIsPrivate, setEditIsPrivate] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [showMemberDrawer, setShowMemberDrawer] = useState(false);
+  const [showOverridesDrawer, setShowOverridesDrawer] = useState(false);
 
   const channels = serverId ? channelsByServer.get(serverId) ?? [] : [];
 
@@ -94,6 +98,16 @@ export function ChannelList() {
     setEditName(channel.name);
     setEditIsPrivate(channel.isPrivate);
     setShowEditDialog(true);
+  };
+
+  const openMemberManagement = () => {
+    setContextMenuChannel(null);
+    setShowMemberDrawer(true);
+  };
+
+  const openOverrides = () => {
+    setContextMenuChannel(null);
+    setShowOverridesDrawer(true);
   };
 
   if (!serverId) {
@@ -289,11 +303,13 @@ export function ChannelList() {
               <Edit2 className="h-4 w-4 mr-2" />
               Edit Channel
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { /* TODO: open member management */ }}>
-              <Users className="h-4 w-4 mr-2" />
-              Manage Members
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { /* TODO: open overrides */ }}>
+            {contextMenuChannel.isPrivate && (
+              <DropdownMenuItem onClick={openMemberManagement}>
+                <Users className="h-4 w-4 mr-2" />
+                Manage Members
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={openOverrides}>
               <Settings className="h-4 w-4 mr-2" />
               Overrides
             </DropdownMenuItem>
@@ -308,6 +324,19 @@ export function ChannelList() {
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      <MemberManagementDrawer
+        open={showMemberDrawer}
+        onOpenChange={setShowMemberDrawer}
+        channelId={contextMenuChannel?.id ?? ''}
+        serverId={serverId ?? ''}
+      />
+
+      <OverridesDrawer
+        open={showOverridesDrawer}
+        onOpenChange={setShowOverridesDrawer}
+        channelId={contextMenuChannel?.id ?? ''}
+      />
     </div>
   );
 }
