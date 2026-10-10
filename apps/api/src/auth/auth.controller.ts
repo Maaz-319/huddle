@@ -5,6 +5,7 @@ import {
   Get,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -18,6 +19,7 @@ import { AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import { GithubAuthGuard } from './github-auth.guard';
 import { SessionAuthGuard } from './session-auth.guard';
+import { ParseSnowflakeArrayPipe } from '../common/parse-snowflake-array.pipe';
 import { UpdateBioDto } from './update-bio.dto';
 import type { User } from './user-repository.interface';
 
@@ -155,5 +157,22 @@ export class AuthController {
   ): Promise<void> {
     await this.authService.markDeleted(user.id);
     await endSession(req, res);
+  }
+
+  /**
+   * Bulk user lookup by ids. Used by the member sidebar to resolve usernames
+   * and avatars for a server's member list.
+   *
+   * Returns users in the order requested. Users that don't exist (or are
+   * deleted) are omitted from the result.
+   */
+  @Get('users')
+  @UseGuards(SessionAuthGuard)
+  @RateLimit('read')
+  async getUsers(
+    @Query('ids', ParseSnowflakeArrayPipe) ids: bigint[],
+  ): Promise<MeResponse[]> {
+    const users = await this.authService.findByIds(ids);
+    return users.map(toMeResponse);
   }
 }

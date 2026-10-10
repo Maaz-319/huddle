@@ -20,6 +20,7 @@ import { AdministrationService } from './administration.service';
 import { CreateServerDto } from './create-server.dto';
 import type { Invite } from './invite-repository.interface';
 import type { Membership } from './membership-repository.interface';
+import type { Role } from './membership-repository.interface';
 import type { Server } from './server-repository.interface';
 import { TransferOwnershipDto } from './transfer-ownership.dto';
 import { UpdateMemberRoleDto } from './update-member-role.dto';
@@ -76,6 +77,21 @@ function toInviteResponse(invite: Invite): InviteResponse {
     revokedAt:
       invite.revokedAt === null ? null : invite.revokedAt.toISOString(),
     createdAt: invite.createdAt.toISOString(),
+  };
+}
+
+/** The shape a server member list returns. */
+interface ServerMemberResponse {
+  userId: string;
+  role: Role;
+  joinedAt: string;
+}
+
+function toServerMemberResponse(membership: Membership): ServerMemberResponse {
+  return {
+    userId: membership.userId.toString(),
+    role: membership.role,
+    joinedAt: membership.joinedAt.toISOString(),
   };
 }
 
@@ -238,5 +254,19 @@ export class AdministrationController {
       user.id,
       dto.toUserId,
     );
+  }
+
+  @Get(':serverId/members')
+  @RateLimit('read')
+  async listMembers(
+    @CurrentUser() user: User,
+    @Param('serverId', ParseSnowflakePipe) serverId: bigint,
+  ): Promise<ServerMemberResponse[]> {
+    const members = await this.administration.listServerMembers(
+      serverId,
+      user.id,
+    );
+
+    return members.map(toServerMemberResponse);
   }
 }

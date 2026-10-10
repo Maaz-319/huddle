@@ -96,4 +96,7 @@ export abstract class UserRepository {
    * Throws `NotFoundError` if no such user exists.
    */
   abstract markDeleted(id: bigint): Promise<void>;
+
+  /** Multiple users by their ids, in the order requested. */
+  abstract findByIds(ids: bigint[]): Promise<User[]>;
 }

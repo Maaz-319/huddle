@@ -108,4 +108,12 @@ export class FakeMembershipRepository extends MembershipRepository {
 
     return Promise.resolve();
   }
+
+  findByServerId(serverId: bigint): Promise<Membership[]> {
+    const found = [...this.store.memberships.values()].filter(
+      (membership) => membership.serverId === serverId,
+    );
+
+    return Promise.resolve(found.map((membership) => ({ ...membership })));
+  }
 }

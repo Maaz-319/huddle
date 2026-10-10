@@ -104,6 +104,15 @@ export class FakeUserRepository extends UserRepository {
     return Promise.resolve();
   }
 
+  findByIds(ids: bigint[]): Promise<User[]> {
+    return Promise.resolve(
+      ids
+        .map((id) => this.users.get(id))
+        .filter((user): user is User => user !== undefined)
+        .map((user) => ({ ...user })),
+    );
+  }
+
   /**
    * Hands out a copy, never the stored object. Without this a caller mutating
    * what it got back would silently rewrite the store — a difference from the

@@ -117,6 +117,21 @@ export class PrismaUserRepository extends UserRepository {
       throw error;
     }
   }
+
+  async findByIds(ids: bigint[]): Promise<User[]> {
+    if (ids.length === 0) return [];
+
+    const rows = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+    });
+
+    // Maintain the order of the requested IDs
+    const rowMap = new Map(rows.map((row) => [row.id, row]));
+    return ids
+      .map((id) => rowMap.get(id))
+      .filter((user): user is UserRow => user !== undefined)
+      .map(toUser);
+  }
 }
 
 /**
