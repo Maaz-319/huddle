@@ -793,6 +793,30 @@ export class AdministrationService {
   }
 
   /**
+   * Every member of a server, with their role and join date.
+   *
+   * Behind `view` (same as `listChannels`): if you can see the server's
+   * channels, you can see who else is in it. The caller must be a member.
+   */
+  async listServerMembers(
+    serverId: bigint,
+    callerId: bigint,
+  ): Promise<Membership[]> {
+    const membership = await this.memberships.findByServerAndUser(
+      serverId,
+      callerId,
+    );
+
+    if (membership === null) {
+      throw new ForbiddenError('Not a member of this server', {
+        serverId: serverId.toString(),
+      });
+    }
+
+    return this.memberships.findByServerId(serverId);
+  }
+
+  /**
    * Revokes a capability from a role in one channel. Authorization —
    * `manage_settings` on this channel — already happened in
    * `RequireCapabilityGuard`, so an Owner always may, and a Moderator may

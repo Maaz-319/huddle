@@ -79,4 +79,7 @@ export abstract class MembershipRepository {
     fromUserId: bigint,
     toUserId: bigint,
   ): Promise<void>;
+
+  /** Every member of this server. */
+  abstract findByServerId(serverId: bigint): Promise<Membership[]>;
 }

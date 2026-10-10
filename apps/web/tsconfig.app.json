@@ -11,7 +11,7 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "ignoreDeprecations": "6.0",
+    "strictNullChecks": true,
 
     /* Bundler mode */
     "moduleResolution": "bundler",

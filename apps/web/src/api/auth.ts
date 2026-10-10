@@ -40,4 +40,10 @@ export const authApi = {
   async deleteAccount(): Promise<void> {
     await fetchWithAuth<void>('/auth/me', { method: 'DELETE' })
   },
+
+  async getUsers(ids: string[]): Promise<MeResponse[]> {
+    const params = new URLSearchParams()
+    params.set('ids', ids.join(','))
+    return fetchWithAuth<MeResponse[]>(`/auth/users?${params.toString()}`)
+  },
 }

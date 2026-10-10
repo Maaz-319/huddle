@@ -44,4 +44,9 @@ export class AuthService {
   markDeleted(id: bigint): Promise<void> {
     return this.users.markDeleted(id);
   }
+
+  /** Multiple users by their ids. Thin passthrough — see the port's own doc. */
+  findByIds(ids: bigint[]): Promise<User[]> {
+    return this.users.findByIds(ids);
+  }
 }

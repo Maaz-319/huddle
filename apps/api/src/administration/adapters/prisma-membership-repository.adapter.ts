@@ -114,6 +114,15 @@ export class PrismaMembershipRepository extends MembershipRepository {
       });
     });
   }
+
+  async findByServerId(serverId: bigint): Promise<Membership[]> {
+    const rows = await this.prisma.membership.findMany({
+      where: { serverId },
+      orderBy: { role: 'asc' },
+    });
+
+    return rows.map(toMembership);
+  }
 }
 
 /** Narrows a caught value to a Prisma error carrying a specific code. */
