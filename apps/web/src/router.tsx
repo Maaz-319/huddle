@@ -1,21 +1,14 @@
-import { createRouter, createRootRouteWithContext, createRoute, Outlet, redirect } from '@tanstack/react-router'
-import { useAuthStore } from '@/stores/authStore'
-import type { AuthState } from '@/stores/authStore'
+import { createRouter, createRootRoute, createRoute, Outlet } from '@tanstack/react-router'
 import { LandingPage } from '@/components/auth/LandingPage'
 import { AuthCallback } from '@/components/auth/AuthCallback'
-import { AppShell } from '@/components/layout/AppShell'
+import { ProtectedApp } from '@/components/layout/ProtectedApp'
 import { ServerView } from '@/components/layout/ServerView'
 import { ServerSettings } from '@/components/layout/ServerSettings'
 import { InvitePreviewPage } from '@/components/invite/InvitePreviewPage'
 import { MessagePane } from '@/components/chat/MessagePane'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 
-// Type-safe router context
-interface RouterContext {
-  auth: AuthState
-}
-
-const rootRoute = createRootRouteWithContext<RouterContext>()({
+const rootRoute = createRootRoute({
   component: () => <Outlet />,
 })
 
@@ -44,16 +37,7 @@ const invitePreviewRoute = createRoute({
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/app',
-  component: () => <AppShell />,
-  beforeLoad: async ({ context }: { context: RouterContext }) => {
-    const { isHydrated, hydrate } = context.auth
-    if (!isHydrated) {
-      await hydrate()
-    }
-    if (!context.auth.user) {
-      throw redirect({ to: '/' })
-    }
-  },
+  component: () => <ProtectedApp />,
 })
 
 // Server view - /app/@serverId
@@ -110,9 +94,6 @@ export type Router = typeof routeTree
 export const router = createRouter({
   routeTree,
   defaultPreload: 'intent',
-  context: {
-    auth: useAuthStore.getState() as AuthState,
-  },
 })
 
 declare module '@tanstack/react-router' {

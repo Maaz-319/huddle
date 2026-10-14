@@ -107,17 +107,17 @@ export function AppShell() {
   const isTablet = typeof window !== 'undefined' && window.innerWidth >= 640 && window.innerWidth < 1024;
 
   return (
-    <div className="min-h-screen bg-bg-base flex flex-col relative">
+    <div className="min-h-screen bg-bg-base flex flex-col">
       {/* Mobile Header */}
       <MobileHeader />
       
-      <div className="flex-1 flex overflow-hidden lg:pt-0">
-        {/* Server List - Always visible on desktop/tablet, modal on mobile */}
+      <div className="flex-1 flex overflow-hidden lg:pt-0 min-w-0">
+{/* Server List - Always visible on desktop/tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 transition-transform duration-200 ease-in-out z-30',
+          'flex-shrink-0 z-30 min-w-0',
           'w-16 lg:w-16',
           isMobile && !isServerListOpen && '-translate-x-full',
-          isMobile && isServerListOpen && 'translate-x-0 fixed inset-y-0 left-0 bg-bg-raised border-r border-border-subtle shadow-xl',
+          isMobile && isServerListOpen && 'translate-x-0 fixed inset-y-0 left-0 bg-bg-raised border-r border-border-subtle shadow-xl z-30',
           isTablet && 'w-14'
         )}>
           <ErrorBoundary
@@ -130,7 +130,7 @@ export function AppShell() {
 
         {/* Channel List - Collapsible drawer on tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 transition-all duration-200 ease-in-out z-20',
+          'flex-shrink-0 z-20 min-w-0',
           'w-64 lg:w-64',
           isTablet && !isChannelListOpen && 'w-0 overflow-hidden',
           isMobile && !isChannelListOpen && '-translate-x-full fixed inset-y-0 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
@@ -147,7 +147,7 @@ export function AppShell() {
         {/* Message Pane - Center, flex-1 */}
         <div className={cn(
           'flex-1 min-w-0 flex flex-col overflow-hidden',
-          'lg:max-w-3xl lg:mx-auto lg:w-full'
+          'lg:max-w-3xl'
         )}>
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => currentChannelId && apiClient.get(`/channels/${currentChannelId}/messages`)} />}
@@ -159,7 +159,7 @@ export function AppShell() {
 
         {/* Member Sidebar - Collapsible drawer on tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 transition-all duration-200 ease-in-out z-10',
+          'flex-shrink-0 z-10 min-w-0',
           'w-64 lg:w-64',
           isTablet && !isMemberSidebarOpen && 'w-0 overflow-hidden',
           isMobile && !isMemberSidebarOpen && 'translate-x-full fixed inset-y-0 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',

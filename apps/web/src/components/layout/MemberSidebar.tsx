@@ -118,7 +118,7 @@ export function MemberSidebar() {
         const userIds = serverMembers.map((m) => m.userId);
         const users = await authApi.getUsers(userIds);
 
-        const userMap = new Map(users.map((u) => [u.user.id, u.user]));
+        const userMap = new Map(users.map((u) => [u.id, u]));
 
         const enrichedMembers: Member[] = serverMembers.map((m) => {
           const user = userMap.get(m.userId);

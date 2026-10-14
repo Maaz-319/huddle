@@ -10,7 +10,7 @@ export function AuthCallback() {
     async function handleCallback() {
       try {
         const response = await authApi.getMe()
-        setUser(response.user)
+        setUser(response)
         router.navigate({ to: '/app' })
       } catch {
         setUser(null)

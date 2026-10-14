@@ -17,22 +17,20 @@ const STORAGE_KEY = 'huddle-auth'
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
       isHydrated: false,
 
-      hydrate: async () => {
-        const { user } = get()
-        if (user) {
-          try {
-            const response = await authApi.getMe()
-            set({ user: response.user, isHydrated: true })
-          } catch {
-            // Session invalid, clear store
-            set({ user: null, isHydrated: true })
-          }
-        } else {
-          set({ isHydrated: true })
+hydrate: async () => {
+        try {
+          console.log('[authStore] hydrate: calling /auth/me');
+          const response = await authApi.getMe()
+          console.log('[authStore] hydrate: response:', response);
+          set({ user: response, isHydrated: true })
+          console.log('[authStore] hydrate: state set');
+        } catch (e) {
+          console.log('[authStore] hydrate: error:', e);
+          set({ user: null, isHydrated: true })
         }
       },
 
@@ -66,11 +64,6 @@ export const useAuthStore = create<AuthState>()(
       name: STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ user: state.user }),
-      onRehydrateStorage: () => (state) => {
-        if (state) {
-          state.isHydrated = true
-        }
-      },
     },
   ),
 )

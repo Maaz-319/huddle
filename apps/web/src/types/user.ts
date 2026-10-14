@@ -11,8 +11,6 @@ export interface User {
 }
 
 /**
- * Auth response from GET /auth/me
+ * Auth response from GET /auth/me - backend returns User directly
  */
-export interface MeResponse {
-  user: User
-}
+export type MeResponse = User
