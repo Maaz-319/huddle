@@ -13,7 +13,7 @@ export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeo
 }
 
 export function DialogContent({ className, variant = 'modal', children, ...props }: DialogContentProps) {
-  const baseStyles = 'bg-bg-overlay border border-border-subtle rounded-lg shadow-lg max-w-lg w-full'
+  const baseStyles = 'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-bg-overlay border border-border-subtle rounded-lg shadow-lg max-w-lg w-full'
   const variantStyles = {
     modal: 'max-w-md',
     alert: 'max-w-sm',
@@ -22,7 +22,7 @@ export function DialogContent({ className, variant = 'modal', children, ...props
 
   return (
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+      <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
       <Dialog.Content
         className={cn(
           baseStyles,

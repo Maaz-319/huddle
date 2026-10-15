@@ -30,6 +30,8 @@ export function useMessages(channelId: string | null) {
     onMessageDelete,
     setLastMessageId,
     getLastMessageId,
+    setLoading,
+    getLoading,
   } = useMessageStore();
 
   const { emit, on, isConnected } = useSocket();
@@ -47,6 +49,7 @@ export function useMessages(channelId: string | null) {
   const fetchHistory = useCallback(async (options?: { before?: string; after?: string; limit?: number }) => {
     if (!channelId) return;
 
+    setLoading(channelId, true);
     try {
       const params = new URLSearchParams();
       if (options?.before) params.set('before', options.before);
@@ -73,8 +76,17 @@ export function useMessages(channelId: string | null) {
       }
     } catch (error) {
       console.error('Failed to fetch history:', error);
+    } finally {
+      setLoading(channelId, false);
     }
-  }, [channelId, addMessages, prependMessages, setHasMore, setLastMessageId]);
+  }, [channelId, addMessages, prependMessages, setHasMore, setLastMessageId, setLoading]);
+
+  // Fetch history when the channel changes
+  useEffect(() => {
+    if (channelId) {
+      fetchHistory();
+    }
+  }, [channelId, fetchHistory]);
 
   // Send message
   const sendMessage = useCallback(async (content: string) => {
@@ -239,7 +251,7 @@ export function useMessages(channelId: string | null) {
     messages,
     pending,
     hasMore,
-    loading: messages.length === 0 && !hasMore,
+    loading: channelId ? getLoading(channelId) : false,
     fetchHistory,
     sendMessage,
     editMessage,

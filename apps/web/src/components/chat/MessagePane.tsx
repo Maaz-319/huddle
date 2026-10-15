@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useChannelStore } from '@/stores/channelStore';
+import { useParams } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { useMessages, useTyping } from '@/hooks/useMessages';
@@ -9,7 +9,8 @@ import { TypingIndicator } from './TypingIndicator';
 import { EmptyMessages } from './EmptyMessages';
 
 export function MessagePane() {
-  const { currentChannelId } = useChannelStore();
+  const params = useParams({ strict: false }) as { channelId?: string };
+  const currentChannelId = params.channelId ?? null;
   const { user } = useAuthStore();
   const { isOnline } = usePresenceStore();
   

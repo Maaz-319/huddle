@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useParams } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useMessageStore } from '@/stores/messageStore';
@@ -16,21 +16,24 @@ import { MemberSidebar } from './MemberSidebar';
 import { BottomNav, MobileHeader } from './BottomNav';
 import { cn } from '@/components/ui/cn';
 import { useGlobalErrorHandler } from '@/hooks/useGlobalErrorHandler';
+import { useBreakpoints } from '@/hooks/useBreakpoints';
 import { ErrorBoundary, FeatureErrorFallback } from '@/components/ui';
 
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
   const { socket, status, connect, on, isConnected } = useSocket();
   const setLastMessageId = useMessageStore((s) => s.setLastMessageId);
-  const { currentServerId, servers, fetchServers } = useServerStore();
-  const { currentChannelId, fetchChannels } = useChannelStore();
-  const { 
-    isChannelListOpen, 
+  const { currentServerId, servers, fetchServers, setCurrentServerId } = useServerStore();
+  const { fetchChannels, setCurrentChannelId } = useChannelStore();
+  const {
+    isChannelListOpen,
     isMemberSidebarOpen,
     isServerListOpen,
     closeAllDrawers
   } = useUIStore();
+  const { isMobile, isTablet } = useBreakpoints();
   const navigate = useNavigate();
+  const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
 
   // Global error handler
   useGlobalErrorHandler();
@@ -48,6 +51,15 @@ export function AppShell() {
       fetchServers();
     }
   }, [user, fetchServers]);
+
+  // Sync route params into stores — the route is the source of truth
+  useEffect(() => {
+    setCurrentServerId(params.serverId ?? null);
+    setCurrentChannelId(params.channelId ?? null);
+    if (params.serverId) {
+      fetchChannels(params.serverId);
+    }
+  }, [params.serverId, params.channelId, setCurrentServerId, setCurrentChannelId, fetchChannels]);
 
   // Connect socket when authenticated
   useEffect(() => {
@@ -103,22 +115,18 @@ export function AppShell() {
     }
   }, [currentServerId, servers, navigate]);
 
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-  const isTablet = typeof window !== 'undefined' && window.innerWidth >= 640 && window.innerWidth < 1024;
-
   return (
-    <div className="min-h-screen bg-bg-base flex flex-col">
+    <div className="h-dvh bg-bg-base flex flex-col overflow-hidden">
       {/* Mobile Header */}
       <MobileHeader />
-      
-      <div className="flex-1 flex overflow-hidden lg:pt-0 min-w-0">
-{/* Server List - Always visible on desktop/tablet, modal on mobile */}
+
+      <div className="flex-1 flex overflow-hidden min-w-0">
+        {/* Server List - Always visible on desktop/tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 z-30 min-w-0',
-          'w-16 lg:w-16',
+          'flex-shrink-0 z-30',
+          'w-16',
           isMobile && !isServerListOpen && '-translate-x-full',
-          isMobile && isServerListOpen && 'translate-x-0 fixed inset-y-0 left-0 bg-bg-raised border-r border-border-subtle shadow-xl z-30',
-          isTablet && 'w-14'
+          isMobile && isServerListOpen && 'translate-x-0 fixed top-16 bottom-16 left-0 bg-bg-raised border-r border-border-subtle shadow-xl z-30',
         )}>
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Servers" description="Failed to load your servers" onRetry={() => fetchServers()} />}
@@ -130,11 +138,11 @@ export function AppShell() {
 
         {/* Channel List - Collapsible drawer on tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 z-20 min-w-0',
-          'w-64 lg:w-64',
+          'flex-shrink-0 z-20',
+          'w-64',
           isTablet && !isChannelListOpen && 'w-0 overflow-hidden',
-          isMobile && !isChannelListOpen && '-translate-x-full fixed inset-y-0 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
-          isMobile && isChannelListOpen && 'translate-x-0 fixed inset-y-0 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
+          isMobile && !isChannelListOpen && '-translate-x-full fixed top-16 bottom-16 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
+          isMobile && isChannelListOpen && 'translate-x-0 fixed top-16 bottom-16 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
         )}>
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Channels" description="Failed to load channels" onRetry={() => currentServerId && fetchChannels(currentServerId)} />}
@@ -147,11 +155,11 @@ export function AppShell() {
         {/* Message Pane - Center, flex-1 */}
         <div className={cn(
           'flex-1 min-w-0 flex flex-col overflow-hidden',
-          'lg:max-w-3xl'
+          'lg:max-w-3xl lg:mx-auto'
         )}>
           <ErrorBoundary
-            fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => currentChannelId && apiClient.get(`/channels/${currentChannelId}/messages`)} />}
-            resetKeys={[currentChannelId]}
+            fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => params.channelId && apiClient.get(`/channels/${params.channelId}/messages`)} />}
+            resetKeys={[params.channelId]}
           >
             <MessagePane />
           </ErrorBoundary>
@@ -159,11 +167,11 @@ export function AppShell() {
 
         {/* Member Sidebar - Collapsible drawer on tablet, modal on mobile */}
         <div className={cn(
-          'flex-shrink-0 z-10 min-w-0',
-          'w-64 lg:w-64',
+          'flex-shrink-0 z-10',
+          'w-64',
           isTablet && !isMemberSidebarOpen && 'w-0 overflow-hidden',
-          isMobile && !isMemberSidebarOpen && 'translate-x-full fixed inset-y-0 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
-          isMobile && isMemberSidebarOpen && 'translate-x-0 fixed inset-y-0 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
+          isMobile && !isMemberSidebarOpen && 'translate-x-full fixed top-16 bottom-16 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
+          isMobile && isMemberSidebarOpen && 'translate-x-0 fixed top-16 bottom-16 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
         )}>
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Members" description="Failed to load members" onRetry={() => currentServerId && useChannelStore.getState().listServerMembers(currentServerId)} />}
@@ -176,7 +184,7 @@ export function AppShell() {
 
       {/* Overlay for mobile drawers */}
       {(isMobile && (isChannelListOpen || isMemberSidebarOpen || isServerListOpen)) && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-15 lg:hidden"
           onClick={closeAllDrawers}
           aria-hidden="true"

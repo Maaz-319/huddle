@@ -1,4 +1,4 @@
-import { useParams } from '@tanstack/react-router';
+import { useParams, Link } from '@tanstack/react-router';
 import { Hash, Lock, Plus, Settings, Users, Trash2, Edit2 } from 'lucide-react';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -31,7 +31,7 @@ interface Channel {
 }
 
 export function ChannelList() {
-  const params = useParams({ from: '/app/$serverId', strict: true });
+  const params = useParams({ strict: false }) as { serverId?: string };
   const serverId = params.serverId;
   const { channelsByServer, currentChannelId, createChannel, deleteChannel, updateChannel } = useChannelStore();
   const { closeAllDrawers } = useUIStore();
@@ -160,8 +160,9 @@ export function ChannelList() {
           channels.map((channel) => (
             <Tooltip key={channel.id}>
               <TooltipTrigger>
-                <a
-                  href={`/app/${serverId}/${channel.id}`}
+                <Link
+                  to="/app/$serverId/$channelId"
+                  params={{ serverId, channelId: channel.id }}
                   className={cn(
                     'relative flex h-10 items-center gap-3 px-3 rounded-lg',
                     'transition-colors',
@@ -178,7 +179,7 @@ export function ChannelList() {
                     <Hash className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                   )}
                   <span className="truncate font-medium text-sm">{channel.name}</span>
-                </a>
+                </Link>
               </TooltipTrigger>
               <TooltipContent side="right" align="center">
                 <div className="px-2 py-1 bg-bg-overlay text-text-primary text-sm rounded shadow-lg whitespace-nowrap">

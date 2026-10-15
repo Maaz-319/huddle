@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, Link } from '@tanstack/react-router';
 import { Plus, Settings, Trash2, ExternalLink } from 'lucide-react';
 import { useServerStore } from '@/stores/serverStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -196,8 +196,9 @@ export function ServerList() {
         {servers.map((server) => (
           <Tooltip key={server.id}>
             <TooltipTrigger>
-              <a
-                href={`/app/${server.id}`}
+              <Link
+                to="/app/$serverId"
+                params={{ serverId: server.id }}
                 className={cn(
                   'relative flex h-12 w-12 items-center justify-center rounded-lg',
                   'transition-colors',
@@ -227,7 +228,7 @@ export function ServerList() {
                     {server.name}
                   </div>
                 </TooltipContent>
-              </a>
+              </Link>
             </TooltipTrigger>
           </Tooltip>
         ))}

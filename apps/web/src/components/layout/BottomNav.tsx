@@ -14,7 +14,7 @@ export function BottomNav() {
   ] as const;
 
   return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg-raised border-t border-border-subtle safe-area-bottom">
+    <div className="lg:hidden relative z-40 bg-bg-raised border-t border-border-subtle safe-area-bottom">
       <div className="flex h-16 items-center justify-around px-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -117,7 +117,7 @@ export function MobileHeader() {
   };
 
   return (
-    <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-bg-raised border-b border-border-subtle flex items-center justify-between px-4 safe-area-top">
+    <div className="lg:hidden relative z-40 h-16 flex-shrink-0 bg-bg-raised border-b border-border-subtle flex items-center justify-between px-4 safe-area-top">
       <div className="flex items-center gap-4">
         {getLeftAction()}
         <h1 className="text-text-primary font-semibold text-base truncate">{getTitle()}</h1>

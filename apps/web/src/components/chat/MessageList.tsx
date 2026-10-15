@@ -1,7 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useEffect, useCallback } from 'react';
 import { Message } from './Message';
-import { ScrollAreaComp } from '@/components/ui/scroll-area';
 import type { MessageResponse } from '@/types/socket';
 
 interface MessageListProps {
@@ -72,10 +71,12 @@ export function MessageList({
   const reversedMessages = [...messages].reverse();
 
   return (
-    <ScrollAreaComp className="flex-1">
+    <div
+      ref={parentRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto relative"
+    >
       <div
-        ref={parentRef}
-        onScroll={handleScroll}
         style={{
           height: `${virtualizer.getTotalSize()}px`,
           width: '100%',
@@ -176,6 +177,6 @@ export function MessageList({
           </div>
         )}
       </div>
-    </ScrollAreaComp>
+    </div>
   );
 }

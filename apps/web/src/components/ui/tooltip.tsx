@@ -20,22 +20,24 @@ export interface TooltipContentProps extends React.ComponentPropsWithoutRef<type
 
 export function TooltipContent({ className, side = 'top', align = 'center', sideOffset = 8, children, ...props }: TooltipContentProps) {
   return (
-    <TooltipPrimitive.Content
-      className={cn(
-        'bg-bg-overlay border border-border-subtle rounded-md px-3 py-1.5 text-xs text-text-primary shadow-lg',
-        'data-[state=delayed-open]:animate-in data-[state=closed]:animate-out',
-        'data-[state=delayed-open]:fade-in-0 data-[state=closed]:fade-out-0',
-        'data-[side=top]:slide-in-from-bottom-2 data-[side=bottom]:slide-in-from-top-2',
-        'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
-        className,
-      )}
-      side={side}
-      align={align}
-      sideOffset={sideOffset}
-      {...props}
-    >
-      {children}
-      <TooltipPrimitive.Arrow className="fill-bg-overlay border-border-subtle stroke-border-subtle" width={8} height={4} />
-    </TooltipPrimitive.Content>
+    <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Content
+        className={cn(
+          'bg-bg-overlay border border-border-subtle rounded-md px-3 py-1.5 text-xs text-text-primary shadow-lg z-50',
+          'data-[state=delayed-open]:animate-in data-[state=closed]:animate-out',
+          'data-[state=delayed-open]:fade-in-0 data-[state=closed]:fade-out-0',
+          'data-[side=top]:slide-in-from-bottom-2 data-[side=bottom]:slide-in-from-top-2',
+          'data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2',
+          className,
+        )}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        {...props}
+      >
+        {children}
+        <TooltipPrimitive.Arrow className="fill-bg-overlay border-border-subtle stroke-border-subtle" width={8} height={4} />
+      </TooltipPrimitive.Content>
+    </TooltipPrimitive.Portal>
   )
 }

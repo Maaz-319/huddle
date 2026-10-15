@@ -11,6 +11,7 @@ interface MessageStore {
   messagesByChannel: Map<string, MessageResponse[]>;
   pendingMessages: Map<string, PendingMessage>;
   hasMoreByChannel: Map<string, boolean>;
+  loadingByChannel: Map<string, boolean>;
   currentChannelId: string | null;
 
   setCurrentChannelId: (channelId: string | null) => void;
@@ -24,6 +25,8 @@ interface MessageStore {
   getMessages: (channelId: string) => MessageResponse[];
   setHasMore: (channelId: string, hasMore: boolean) => void;
   getHasMore: (channelId: string) => boolean;
+  setLoading: (channelId: string, loading: boolean) => void;
+  getLoading: (channelId: string) => boolean;
   
   // Optimistic updates
   addPendingMessage: (idempotencyKey: string, message: MessageResponse) => void;
@@ -42,6 +45,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   messagesByChannel: new Map(),
   pendingMessages: new Map(),
   hasMoreByChannel: new Map(),
+  loadingByChannel: new Map(),
   currentChannelId: null,
 
   setCurrentChannelId: (channelId) => set({ currentChannelId: channelId }),
@@ -118,7 +122,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       newLastIds.delete(channelId);
       const newHasMore = new Map(state.hasMoreByChannel);
       newHasMore.delete(channelId);
-      return { messagesByChannel: newMessages, lastMessageIds: newLastIds, hasMoreByChannel: newHasMore };
+      const newLoading = new Map(state.loadingByChannel);
+      newLoading.delete(channelId);
+      return { messagesByChannel: newMessages, lastMessageIds: newLastIds, hasMoreByChannel: newHasMore, loadingByChannel: newLoading };
     }),
 
   getMessages: (channelId) => {
@@ -134,6 +140,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   getHasMore: (channelId) => {
     return get().hasMoreByChannel.get(channelId) ?? true;
+  },
+
+  setLoading: (channelId, loading) =>
+    set((state) => {
+      const newMap = new Map(state.loadingByChannel);
+      newMap.set(channelId, loading);
+      return { loadingByChannel: newMap };
+    }),
+
+  getLoading: (channelId) => {
+    return get().loadingByChannel.get(channelId) ?? false;
   },
 
   addPendingMessage: (idempotencyKey, message) =>

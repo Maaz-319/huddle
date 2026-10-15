@@ -90,7 +90,10 @@ export class AuthController {
   @Get('github/callback')
   @UseGuards(GithubAuthGuard)
   @RateLimit('auth-ip')
-  async githubCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
+  async githubCallback(
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
     const webOrigin = this.config.get('WEB_ORIGIN', { infer: true });
     const user = req.user;
 
@@ -101,7 +104,11 @@ export class AuthController {
 
     req.session.userId = user.id.toString();
     await new Promise<void>((resolve, reject) => {
-      req.session.save((err) => (err ? reject(err) : resolve()));
+      req.session.save((err) =>
+        err
+          ? reject(err instanceof Error ? err : new Error(String(err)))
+          : resolve(),
+      );
     });
     res.redirect(`${webOrigin}/app`);
   }
