@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
@@ -7,7 +7,7 @@ import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { toast } from '@/stores/toastStore';
-import { apiClient } from '@/api/client';
+import { apiClient, isApiError } from '@/api/client';
 import { applyCatchUpReply } from '@/hooks/useMessages';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
@@ -34,6 +34,7 @@ export function AppShell() {
   const { isMobile } = useBreakpoints();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
+  const probingServersRef = useRef<Set<string>>(new Set());
 
   // Global error handler
   useGlobalErrorHandler();
@@ -85,7 +86,43 @@ export function AppShell() {
       channelStore.onChannelAdded(channelId);
     });
     const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
+      const emptiedServerId = (() => {
+        for (const [sid, channels] of useChannelStore.getState().channelsByServer.entries()) {
+          if (channels.some((c) => c.id === channelId)) {
+            return channels.length === 1 ? sid : null;
+          }
+        }
+        return null;
+      })();
+
       channelStore.onChannelRemoved(channelId);
+
+      if (!emptiedServerId || probingServersRef.current.has(emptiedServerId)) return;
+      probingServersRef.current.add(emptiedServerId);
+
+      void (async () => {
+        try {
+          await apiClient.get(`/servers/${emptiedServerId}`);
+        } catch (error) {
+          if (
+            isApiError(error) &&
+            (error.status === 404 || error.status === 403)
+          ) {
+            const wasActive =
+              useServerStore.getState().currentServerId === emptiedServerId;
+            useServerStore.getState().removeServer(emptiedServerId);
+            if (wasActive) {
+              toast.error(
+                'Server unavailable',
+                'You no longer have access to this server.',
+              );
+              navigate({ to: '/app' });
+            }
+          }
+        } finally {
+          probingServersRef.current.delete(emptiedServerId);
+        }
+      })();
     });
 
     return () => {
@@ -93,7 +130,7 @@ export function AppShell() {
       cleanupChannelAdded();
       cleanupChannelRemoved();
     };
-  }, [socket, on]);
+  }, [socket, on, navigate]);
 
   // Catch up on reconnect: every channel the client holds state for, in one
   // frame (not one per channel — that's the reconnection storm the frame

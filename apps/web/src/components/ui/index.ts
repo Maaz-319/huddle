@@ -59,6 +59,7 @@ export {
   TabsContent,
 } from './tabs'
 export { RadioGroupRoot, RadioGroupItem } from './radio-group'
+export { PopoverRoot, PopoverTrigger, PopoverAnchor, PopoverContent } from './popover'
 export { Toaster } from './toast'
 export { ErrorBoundary } from '@/components/error/ErrorBoundary'
 export { FeatureErrorFallback } from '@/components/error/FeatureErrorFallback'

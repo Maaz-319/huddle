@@ -1,16 +1,19 @@
 import { create } from 'zustand';
 import { apiClient } from '@/api/client';
 import type { ServerResponse, InviteResponse } from '@/types/server';
+import type { ServerRole } from '@/types/channel';
 
 interface ServerStore {
   servers: ServerResponse[];
   currentServerId: string | null;
   loading: boolean;
   error: string | null;
+  myRolesByServer: Record<string, ServerRole>;
   
   fetchServers: () => Promise<void>;
   createServer: (name: string, iconUrl?: string | null) => Promise<ServerResponse>;
   deleteServer: (serverId: string) => Promise<void>;
+  removeServer: (serverId: string) => void;
   updateServer: (
     serverId: string,
     data: {
@@ -30,6 +33,7 @@ interface ServerStore {
   revokeInvite: (serverId: string) => Promise<void>;
   regenerateInvite: (serverId: string) => Promise<InviteResponse>;
   setCurrentServerId: (id: string | null) => void;
+  setMyRole: (serverId: string, role: ServerRole) => void;
 }
 
 export const useServerStore = create<ServerStore>((set) => ({
@@ -37,7 +41,8 @@ export const useServerStore = create<ServerStore>((set) => ({
   currentServerId: null,
   loading: false,
   error: null,
-
+  myRolesByServer: {},
+  
   fetchServers: async () => {
     set({ loading: true, error: null });
     try {
@@ -61,6 +66,17 @@ export const useServerStore = create<ServerStore>((set) => ({
       currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
     }));
   },
+
+  removeServer: (serverId) =>
+    set((state) => {
+      const myRolesByServer = { ...state.myRolesByServer };
+      delete myRolesByServer[serverId];
+      return {
+        servers: state.servers.filter((s) => s.id !== serverId),
+        currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
+        myRolesByServer,
+      };
+    }),
 
   updateServer: async (serverId, data) => {
     const server = await apiClient.patch<ServerResponse>(`/servers/${serverId}`, data);
@@ -91,4 +107,9 @@ export const useServerStore = create<ServerStore>((set) => ({
   },
 
   setCurrentServerId: (id) => set({ currentServerId: id }),
+
+  setMyRole: (serverId, role) =>
+    set((state) => ({
+      myRolesByServer: { ...state.myRolesByServer, [serverId]: role },
+    })),
 }));

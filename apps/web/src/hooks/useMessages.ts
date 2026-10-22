@@ -120,7 +120,7 @@ export function useMessages(channelId: string | null) {
   // Send message
   const sendMessage = useCallback(async (content: string) => {
     const user = useAuthStore.getState().user;
-    if (!channelId || !isConnected || !user) return;
+    if (!channelId || !user) return;
 
     const idempotencyKey = crypto.randomUUID();
 
@@ -146,15 +146,23 @@ export function useMessages(channelId: string | null) {
     addPendingMessage(idempotencyKey, optimisticMessage);
 
     try {
-      const ack = await emit('message_send', { channelId, content });
-      // The server will broadcast message_create, which will replace the optimistic message
-      // But we also get the ack with the real message ID
-      resolvePendingMessage(idempotencyKey, {
-        ...optimisticMessage,
-        id: ack.messageId,
-        createdAt: ack.createdAt,
-        pending: false,
-      });
+      if (isConnected) {
+        const ack = await emit('message_send', { channelId, content });
+        // The server will broadcast message_create, which will replace the optimistic message
+        // But we also get the ack with the real message ID
+        resolvePendingMessage(idempotencyKey, {
+          ...optimisticMessage,
+          id: ack.messageId,
+          createdAt: ack.createdAt,
+          pending: false,
+        });
+      } else {
+        const created = await apiClient.post<MessageResponse>(
+          `/channels/${channelId}/messages`,
+          { content },
+        );
+        resolvePendingMessage(idempotencyKey, { ...created, pending: false });
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       rejectPendingMessage(idempotencyKey);
@@ -179,7 +187,7 @@ export function useMessages(channelId: string | null) {
 
   // Edit message
   const editMessage = useCallback(async (messageId: string, content: string) => {
-    if (!channelId || !isConnected) return;
+    if (!channelId) return;
 
     // Optimistic update
     const messages = getMessages(channelId);
@@ -196,8 +204,16 @@ export function useMessages(channelId: string | null) {
     updateMessage(channelId, optimisticMessage);
 
     try {
-      await emit('message_edit', { channelId, messageId, content });
-      // Server will broadcast message_update
+      if (isConnected) {
+        await emit('message_edit', { channelId, messageId, content });
+        // Server will broadcast message_update
+      } else {
+        const updated = await apiClient.patch<MessageResponse>(
+          `/channels/${channelId}/messages/${messageId}`,
+          { content },
+        );
+        updateMessage(channelId, { ...updated, pending: false });
+      }
     } catch (error) {
       console.error('Failed to edit message:', error);
       // Rollback
@@ -208,7 +224,7 @@ export function useMessages(channelId: string | null) {
 
   // Delete message
   const deleteMessage = useCallback(async (messageId: string) => {
-    if (!channelId || !isConnected) return;
+    if (!channelId) return;
 
     // Optimistic update - mark as deleted
     const messages = getMessages(channelId);
@@ -225,8 +241,13 @@ export function useMessages(channelId: string | null) {
     updateMessage(channelId, deletedMessage);
 
     try {
-      await emit('message_delete', { channelId, messageId });
-      // Server will broadcast message_delete
+      if (isConnected) {
+        await emit('message_delete', { channelId, messageId });
+        // Server will broadcast message_delete
+      } else {
+        await apiClient.delete(`/channels/${channelId}/messages/${messageId}`);
+        updateMessage(channelId, { ...deletedMessage, pending: false });
+      }
     } catch (error) {
       console.error('Failed to delete message:', error);
       // Rollback
@@ -319,7 +340,7 @@ export function useMessages(channelId: string | null) {
 const TYPING_TTL_MS = 7000;
 
 export function useTyping(channelId: string | null) {
-  const { emit, on } = useSocket();
+  const { emitNoAck, on } = useSocket();
   const user = useAuthStore((s) => s.user);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expiriesRef = useRef<Map<string, number>>(new Map());
@@ -395,9 +416,9 @@ export function useTyping(channelId: string | null) {
   const stopTypingRef = useRef<() => void>(() => {});
 
   const startTyping = useCallback(() => {
-    if (!channelId || !emit) return;
+    if (!channelId) return;
 
-    emit('typing', { channelId, typing: true }).catch(console.error);
+    emitNoAck('typing', { channelId });
 
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -407,18 +428,14 @@ export function useTyping(channelId: string | null) {
     typingTimeoutRef.current = setTimeout(() => {
       stopTypingRef.current();
     }, 5000);
-  }, [channelId, emit]);
+  }, [channelId, emitNoAck]);
 
   const stopTyping = useCallback(() => {
-    if (!channelId || !emit) return;
-
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
-
-    emit('typing', { channelId, typing: false }).catch(console.error);
-  }, [channelId, emit]);
+  }, []);
 
   useEffect(() => {
     stopTypingRef.current = stopTyping;

@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { useSocketStore } from '@/stores/socketStore';
 import { usePresenceStore } from '@/stores/presenceStore';
+import { crypto } from '@/utils/crypto';
 import type { SocketStatus, ServerEventMap, ServerEventType, ClientEventType, ClientEventMap, AckResponseMap } from '@/types/socket';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -193,9 +194,10 @@ export function emitWithAck<K extends ClientEventType>(
       reject(new Error(`Ack timeout for ${event}`));
     }, timeoutMs);
 
-    // Store the promise resolvers
+    const ackKey = crypto.randomUUID();
+
     const { addPendingAck, resolvePendingAck, rejectPendingAck } = useSocketStore.getState();
-    addPendingAck(payload.idempotencyKey, { 
+    addPendingAck(ackKey, { 
       resolve: resolve as (value: unknown) => void, 
       reject, 
       timeout 
@@ -204,9 +206,9 @@ export function emitWithAck<K extends ClientEventType>(
     // Emit with ack callback
     socket.emit(event, payload, (response: AckResponseMap[K]) => {
       if ('error' in response && response.error) {
-        rejectPendingAck(payload.idempotencyKey, new Error(response.error.code));
+        rejectPendingAck(ackKey, new Error(response.error.code));
       } else {
-        resolvePendingAck(payload.idempotencyKey, response);
+        resolvePendingAck(ackKey, response);
       }
     });
   });

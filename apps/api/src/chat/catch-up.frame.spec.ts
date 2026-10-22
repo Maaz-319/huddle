@@ -112,6 +112,15 @@ describe('CatchUpFrameDto', () => {
       ).rejects.toBeInstanceOf(ValidationError);
     });
 
+    it('rejects an idempotency key — the frame carries no key at all', async () => {
+      await expect(
+        parseCatchUpFrame({
+          channels: [entry()],
+          idempotencyKey: 'b7e0c4a1-6d2f-4a77-9f2c-0a3d5e6f7a8b',
+        }),
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
     it('rejects a payload that is not an object at all', async () => {
       await expect(parseCatchUpFrame('catch_up')).rejects.toBeInstanceOf(
         ValidationError,

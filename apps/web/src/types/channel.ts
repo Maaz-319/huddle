@@ -23,3 +23,5 @@ export interface ServerMemberResponse {
   role: 'owner' | 'moderator' | 'member';
   joinedAt: string;
 }
+
+export type ServerRole = ServerMemberResponse['role'];

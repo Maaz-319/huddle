@@ -7,6 +7,7 @@ import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useMessages, useTyping } from '@/hooks/useMessages';
+import { useMyRole } from '@/hooks/useMyRole';
 import { Button } from '@/components/ui/button';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
@@ -38,6 +39,8 @@ export function MessagePane() {
   } = useMessages(currentChannelId);
 
   const { startTyping, stopTyping, typingUsernames } = useTyping(currentChannelId);
+  const myRole = useMyRole(params.serverId ?? null);
+  const canDeleteOthers = myRole === 'owner' || myRole === 'moderator';
 
   // Real channel/server identity for the header
   const channel = currentChannelId
@@ -154,6 +157,7 @@ export function MessagePane() {
             <MessageList
               messages={messages}
               isOwn={isOwn}
+              canDeleteOthers={canDeleteOthers}
               onEdit={handleEdit}
               onDelete={handleDelete}
               onCopy={handleCopy}
