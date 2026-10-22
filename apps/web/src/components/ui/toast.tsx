@@ -9,7 +9,9 @@ export function Toaster() {
   return (
     <div
       className={cn(
-        'fixed bottom-4 right-4 z-[100] flex flex-col gap-2',
+        // Clear of the mobile bottom nav (4rem + safe-area); desktop unchanged.
+        'fixed right-4 z-[100] flex flex-col gap-2',
+        'bottom-[calc(4rem+env(safe-area-inset-bottom,0px)+1rem)] lg:bottom-4',
         'pointer-events-none'
       )}
       role="region"
@@ -61,7 +63,7 @@ function Toast({ toast, onClose }: ToastProps) {
     <div
       className={cn(
         'relative flex items-start gap-3 p-4 rounded-lg border shadow-lg',
-        'min-w-[300px] max-w-md',
+        'w-[min(300px,calc(100vw-2rem))] max-w-md',
         'pointer-events-auto',
         'animate-in slide-in-from-right-full duration-300',
         typeStyles[toast.type]

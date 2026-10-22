@@ -13,7 +13,7 @@ export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeo
 }
 
 export function DialogContent({ className, variant = 'modal', children, ...props }: DialogContentProps) {
-  const baseStyles = 'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-bg-overlay border border-border-subtle rounded-lg shadow-lg max-w-lg w-full'
+  const baseStyles = 'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-bg-overlay border border-border-subtle rounded-lg shadow-lg max-w-lg w-full p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto'
   const variantStyles = {
     modal: 'max-w-md',
     alert: 'max-w-sm',
@@ -31,7 +31,6 @@ export function DialogContent({ className, variant = 'modal', children, ...props
           'data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
           'data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
           'data-[state=open]:slide-in-from-top-4 data-[state=closed]:slide-out-to-top-4',
-          'sm:max-w-lg',
           className,
         )}
         {...props}
@@ -52,7 +51,7 @@ export interface DialogTitleProps extends React.ComponentPropsWithoutRef<typeof 
 
 export function DialogTitle({ className, children, ...props }: DialogTitleProps) {
   return (
-    <Dialog.Title className={cn('text-lg font-semibold text-text-primary', className)} {...props}>
+    <Dialog.Title className={cn('text-lg font-semibold text-text-primary pr-8', className)} {...props}>
       {children}
     </Dialog.Title>
   )

@@ -11,7 +11,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles = {
-  primary: 'bg-accent-primary text-white hover:opacity-90 focus-visible:ring-accent-primary',
+  // Green fills take dark text: #00ff88 is bright, white on it fails contrast.
+  primary: 'bg-accent-primary text-bg-base hover:opacity-90 focus-visible:ring-accent-primary',
   secondary: 'bg-bg-raised text-text-primary hover:bg-bg-overlay focus-visible:ring-border-focus',
   ghost: 'bg-transparent text-text-primary hover:bg-bg-raised focus-visible:ring-border-focus',
   destructive: 'bg-accent-warn text-white hover:opacity-90 focus-visible:ring-accent-warn',
