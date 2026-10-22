@@ -113,7 +113,8 @@ describe('GitHub OAuth login (e2e)', () => {
     );
 
     expect(callback.status).toBe(302);
-    expect(callback.headers.location).toBe(process.env['WEB_ORIGIN']);
+    // The web app is served under /app (auth.controller.ts).
+    expect(callback.headers.location).toBe(`${process.env['WEB_ORIGIN']}/app`);
     expect(callback.headers['set-cookie']).toBeDefined();
 
     const user = await prisma.user.findUnique({
@@ -157,7 +158,7 @@ describe('GitHub OAuth login (e2e)', () => {
 
     expect(callback.status).toBe(302);
     expect(callback.headers.location).toBe(
-      `${process.env['WEB_ORIGIN']}?error=oauth_failed`,
+      `${process.env['WEB_ORIGIN']}/app?error=oauth_failed`,
     );
 
     const user = await prisma.user.findUnique({
