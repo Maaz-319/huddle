@@ -1,5 +1,5 @@
 import { useParams, Link } from '@tanstack/react-router';
-import { Hash, Lock, Plus, Settings, Users, Trash2, Edit2 } from 'lucide-react';
+import { Hash, Lock, Plus, Settings, Users, Trash2, Edit2, MoreVertical } from 'lucide-react';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { toast } from '@/stores/toastStore';
 import { useState } from 'react';
 import { MemberManagementDrawer } from '@/components/channels/MemberManagementDrawer';
 import { OverridesDrawer } from '@/components/channels/OverridesDrawer';
+import { useContextMenu } from '@/hooks/useContextMenu';
 
 interface Channel {
   id: string;
@@ -39,7 +40,10 @@ export function ChannelList() {
   const [createName, setCreateName] = useState('');
   const [createIsPrivate, setCreateIsPrivate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [contextMenuChannel, setContextMenuChannel] = useState<Channel | null>(null);
+  const channelMenu = useContextMenu<Channel>();
+  // The channel any open dialog/drawer acts on — kept separately from the
+  // menu state so closing the menu doesn't orphan the drawer's target.
+  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editName, setEditName] = useState('');
   const [editIsPrivate, setEditIsPrivate] = useState(false);
@@ -68,13 +72,13 @@ export function ChannelList() {
 
   const handleEditChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editName.trim() || !contextMenuChannel) return;
+    if (!editName.trim() || !activeChannel) return;
     
     setEditing(true);
     try {
-      await updateChannel(contextMenuChannel.id, { name: editName.trim(), isPrivate: editIsPrivate });
+      await updateChannel(activeChannel.id, { name: editName.trim(), isPrivate: editIsPrivate });
       setShowEditDialog(false);
-      setContextMenuChannel(null);
+      setActiveChannel(null);
     } catch (error) {
       toast.error('Failed to update channel', error instanceof Error ? error.message : 'Unknown error');
     } finally {
@@ -90,29 +94,28 @@ export function ChannelList() {
     } catch (error) {
       toast.error('Failed to delete channel', error instanceof Error ? error.message : 'Unknown error');
     }
-    setContextMenuChannel(null);
   };
 
   const openEditDialog = (channel: Channel) => {
-    setContextMenuChannel(channel);
+    setActiveChannel(channel);
     setEditName(channel.name);
     setEditIsPrivate(channel.isPrivate);
     setShowEditDialog(true);
   };
 
-  const openMemberManagement = () => {
-    setContextMenuChannel(null);
+  const openMemberManagement = (channel: Channel) => {
+    setActiveChannel(channel);
     setShowMemberDrawer(true);
   };
 
-  const openOverrides = () => {
-    setContextMenuChannel(null);
+  const openOverrides = (channel: Channel) => {
+    setActiveChannel(channel);
     setShowOverridesDrawer(true);
   };
 
   if (!serverId) {
     return (
-      <div className="flex flex-col h-full w-64 bg-bg-base border-r border-border-subtle">
+      <div className="flex flex-col h-full w-full bg-bg-base border-r border-border-subtle">
         <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
           <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Channels</h2>
         </div>
@@ -126,8 +129,7 @@ export function ChannelList() {
   return (
     <div className={cn(
       'flex flex-col h-full bg-bg-base border-r border-border-subtle transition-all duration-200',
-      'w-64',
-      'lg:w-64'
+      'w-full'
     )}>
       <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Channels</h2>
@@ -158,35 +160,55 @@ export function ChannelList() {
           </div>
         ) : (
           channels.map((channel) => (
-            <Tooltip key={channel.id}>
-              <TooltipTrigger>
-                <Link
-                  to="/app/$serverId/$channelId"
-                  params={{ serverId, channelId: channel.id }}
-                  className={cn(
-                    'relative flex h-10 items-center gap-3 px-3 rounded-lg',
-                    'transition-colors',
-                    'hover:bg-bg-raised',
-                    currentChannelId === channel.id 
-                      ? 'bg-accent-primary/10 text-accent-primary' 
-                      : 'text-text-secondary hover:text-text-primary'
-                  )}
-                  onClick={() => closeAllDrawers()}
-                >
-                  {channel.isPrivate ? (
-                    <Lock className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                  ) : (
-                    <Hash className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                  )}
-                  <span className="truncate font-medium text-sm">{channel.name}</span>
-                </Link>
-              </TooltipTrigger>
-              <TooltipContent side="right" align="center">
-                <div className="px-2 py-1 bg-bg-overlay text-text-primary text-sm rounded shadow-lg whitespace-nowrap">
+            <div key={channel.id} className="group relative">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    to="/app/$serverId/$channelId"
+                    params={{ serverId, channelId: channel.id }}
+                    className={cn(
+                      'relative flex h-10 items-center gap-3 px-3 rounded-lg',
+                      'transition-colors',
+                      'hover:bg-bg-raised',
+                      currentChannelId === channel.id
+                        ? 'bg-accent-primary/10 text-accent-primary'
+                        : 'text-text-secondary hover:text-text-primary'
+                    )}
+                    onClick={() => closeAllDrawers()}
+                    {...channelMenu.triggerProps(channel)}
+                  >
+                    {channel.isPrivate ? (
+                      <Lock className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                    ) : (
+                      <Hash className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="truncate font-medium text-sm">{channel.name}</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right" align="center">
                   {channel.name} {channel.isPrivate ? '(Private)' : '(Public)'}
-                </div>
-              </TooltipContent>
-            </Tooltip>
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Visible affordance — kebab opens the same menu as right-click */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0',
+                  'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity',
+                  'pointer-coarse:opacity-100',
+                  'text-text-secondary hover:text-text-primary'
+                )}
+                aria-label={`Options for ${channel.name}`}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  channelMenu.open(channel, rect.right, rect.bottom + 4);
+                }}
+              >
+                <MoreVertical className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           ))
         )}
       </nav>
@@ -246,7 +268,7 @@ export function ChannelList() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+      <Dialog open={showEditDialog} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setActiveChannel(null); }}>
         <DialogContent className="max-w-md">
           <DialogTitle>Edit Channel</DialogTitle>
           <DialogDescription>Update channel name and type</DialogDescription>
@@ -289,54 +311,69 @@ export function ChannelList() {
         </DialogContent>
       </Dialog>
 
-      {contextMenuChannel && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <div className="fixed inset-0 z-50" onClick={() => setContextMenuChannel(null)} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="fixed z-50"
-            sideOffset={5}
-          >
-            <DropdownMenuLabel className="text-text-primary">{contextMenuChannel.name}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => openEditDialog(contextMenuChannel)}>
-              <Edit2 className="h-4 w-4 mr-2" />
-              Edit Channel
-            </DropdownMenuItem>
-            {contextMenuChannel.isPrivate && (
-              <DropdownMenuItem onClick={openMemberManagement}>
-                <Users className="h-4 w-4 mr-2" />
-                Manage Members
+      <DropdownMenu
+        open={channelMenu.state !== null}
+        onOpenChange={(open) => { if (!open) channelMenu.close(); }}
+      >
+        {channelMenu.state && (
+          <>
+            {/* Radix 2.x has no virtual anchor; a 1px fixed trigger at the
+                pointer gives the menu its position. */}
+            <DropdownMenuTrigger
+              style={{
+                position: 'fixed',
+                left: channelMenu.state.anchor.x,
+                top: channelMenu.state.anchor.y,
+                width: 1,
+                height: 1,
+                padding: 0,
+                border: 0,
+              }}
+              aria-hidden
+            />
+            <DropdownMenuContent sideOffset={5} className="z-[60]">
+              <DropdownMenuLabel className="text-text-primary truncate">
+                {channelMenu.state.target.name}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => openEditDialog(channelMenu.state!.target)}>
+                <Edit2 className="h-4 w-4 mr-2" />
+                Edit Channel
               </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={openOverrides}>
-              <Settings className="h-4 w-4 mr-2" />
-              Overrides
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem 
-              onClick={() => handleDeleteChannel(contextMenuChannel.id)}
-              className="text-accent-warn focus:text-accent-warn"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete Channel
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+              {channelMenu.state.target.isPrivate && (
+                <DropdownMenuItem onClick={() => openMemberManagement(channelMenu.state!.target)}>
+                  <Users className="h-4 w-4 mr-2" />
+                  Manage Members
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => openOverrides(channelMenu.state!.target)}>
+                <Settings className="h-4 w-4 mr-2" />
+                Overrides
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => handleDeleteChannel(channelMenu.state!.target.id)}
+                className="text-accent-warn focus:text-accent-warn"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Channel
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </>
+        )}
+      </DropdownMenu>
 
       <MemberManagementDrawer
         open={showMemberDrawer}
-        onOpenChange={setShowMemberDrawer}
-        channelId={contextMenuChannel?.id ?? ''}
+        onOpenChange={(open) => { setShowMemberDrawer(open); if (!open) setActiveChannel(null); }}
+        channelId={activeChannel?.id ?? ''}
         serverId={serverId ?? ''}
       />
 
       <OverridesDrawer
         open={showOverridesDrawer}
-        onOpenChange={setShowOverridesDrawer}
-        channelId={contextMenuChannel?.id ?? ''}
+        onOpenChange={(open) => { setShowOverridesDrawer(open); if (!open) setActiveChannel(null); }}
+        channelId={activeChannel?.id ?? ''}
       />
     </div>
   );

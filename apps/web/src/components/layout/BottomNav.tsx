@@ -1,7 +1,8 @@
 import { cn } from '@/components/ui/cn';
 import { useUIStore } from '@/stores/uiStore';
-import { Hash, Users, MessageSquare, Server, Menu, X } from 'lucide-react';
+import { Hash, Users, MessageSquare, Server, Menu, X, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useNavigate } from '@tanstack/react-router';
 
 export function BottomNav() {
   const { activeMobileTab, setActiveMobileTab, setChannelListOpen, setMemberSidebarOpen, setServerListOpen, closeAllDrawers } = useUIStore();
@@ -22,12 +23,12 @@ export function BottomNav() {
           return (
             <Button
               key={tab.id}
-              variant={isActive ? 'primary' : 'ghost'}
+              variant="ghost"
               size="icon"
               className={cn(
                 'flex flex-col items-center gap-1 px-2 py-1.5',
                 'text-text-secondary',
-                isActive && 'text-accent-primary'
+                isActive && 'text-accent-primary bg-accent-primary/10'
               )}
               onClick={() => {
                 setActiveMobileTab(tab.id);
@@ -61,7 +62,7 @@ export function BottomNav() {
 
 export function MobileHeader() {
   const { activeMobileTab, setChannelListOpen, setMemberSidebarOpen, setServerListOpen } = useUIStore();
-  const navigate = (path: string) => { window.location.href = path; };
+  const navigate = useNavigate();
 
   const getTitle = () => {
     switch (activeMobileTab) {
@@ -108,8 +109,8 @@ export function MobileHeader() {
   const getRightAction = () => {
     if (activeMobileTab === 'servers') {
       return (
-        <Button variant="ghost" size="icon" onClick={() => navigate('/app/create-server')}>
-          <Server className="h-5 w-5" />
+        <Button variant="ghost" size="icon" onClick={() => navigate({ to: '/app/settings' })} aria-label="Your settings">
+          <User className="h-5 w-5" />
         </Button>
       );
     }

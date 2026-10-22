@@ -2,7 +2,10 @@ import { createRouter, createRootRoute, createRoute, Outlet } from '@tanstack/re
 import { LandingPage } from '@/components/auth/LandingPage'
 import { AuthCallback } from '@/components/auth/AuthCallback'
 import { ProtectedApp } from '@/components/layout/ProtectedApp'
+import { AppShell } from '@/components/layout/AppShell'
+import { SettingsShell } from '@/components/layout/SettingsShell'
 import { ServerView } from '@/components/layout/ServerView'
+import { ServerHome } from '@/components/layout/ServerHome'
 import { ServerSettings } from '@/components/layout/ServerSettings'
 import { InvitePreviewPage } from '@/components/invite/InvitePreviewPage'
 import { MessagePane } from '@/components/chat/MessagePane'
@@ -33,44 +36,65 @@ const invitePreviewRoute = createRoute({
   component: () => <InvitePreviewPage />,
 })
 
-// Protected app routes - /app/*
+// Protected app routes - /app/* (auth gate only; shell chosen by children)
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/app',
   component: () => <ProtectedApp />,
 })
 
-// Server view - /app/@serverId
-const serverRoute = createRoute({
+// Chat shell - three columns on desktop, drawers on mobile
+const appShellRoute = createRoute({
   getParentRoute: () => appRoute,
+  id: 'shell',
+  component: () => <AppShell />,
+})
+
+// Settings shell - full-screen, outside the chat columns
+const settingsShellRoute = createRoute({
+  getParentRoute: () => appRoute,
+  id: 'settings',
+  component: () => <SettingsShell />,
+})
+
+// Server view - /app/$serverId
+const serverRoute = createRoute({
+  getParentRoute: () => appShellRoute,
   path: '/$serverId',
   component: () => <ServerView />,
 })
 
-// Channel view - /app/@serverId/@channelId
+// Channel view - /app/$serverId/$channelId
 const channelRoute = createRoute({
   getParentRoute: () => serverRoute,
   path: '/$channelId',
   component: () => <MessagePane />,
 })
 
-// Server settings - /app/@serverId/settings
-const serverSettingsRoute = createRoute({
+// Server home - /app/$serverId (no channel selected)
+const serverIndexRoute = createRoute({
   getParentRoute: () => serverRoute,
-  path: '/settings',
+  path: '/',
+  component: () => <ServerHome />,
+})
+
+// Server settings - /app/$serverId/settings (full-screen)
+const serverSettingsRoute = createRoute({
+  getParentRoute: () => settingsShellRoute,
+  path: '/$serverId/settings',
   component: () => <ServerSettings />,
 })
 
-// User settings - /app/settings
-const settingsRoute = createRoute({
-  getParentRoute: () => appRoute,
+// User settings - /app/settings (full-screen)
+const userSettingsRoute = createRoute({
+  getParentRoute: () => settingsShellRoute,
   path: '/settings',
   component: () => <SettingsPage />,
 })
 
 // Redirect /app to first server or show empty state
 const appIndexRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => appShellRoute,
   path: '/',
   beforeLoad: () => {
     // This will be handled by AppShell effect
@@ -79,13 +103,15 @@ const appIndexRoute = createRoute({
 })
 
 export const routeTree = rootRoute.addChildren([
-  indexRoute, 
-  authCallbackRoute, 
+  indexRoute,
+  authCallbackRoute,
   invitePreviewRoute,
   appRoute.addChildren([
-    appIndexRoute,
-    settingsRoute,
-    serverRoute.addChildren([channelRoute, serverSettingsRoute]),
+    appShellRoute.addChildren([
+      appIndexRoute,
+      serverRoute.addChildren([serverIndexRoute, channelRoute]),
+    ]),
+    settingsShellRoute.addChildren([userSettingsRoute, serverSettingsRoute]),
   ])
 ])
 

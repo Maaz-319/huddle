@@ -1,17 +1,16 @@
 import { useEffect } from 'react';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useMessageStore } from '@/stores/messageStore';
 import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
-import { Toaster } from '@/components/ui';
 import { toast } from '@/stores/toastStore';
 import { apiClient } from '@/api/client';
+import { applyCatchUpReply } from '@/hooks/useMessages';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
-import { MessagePane } from './MessagePane';
 import { MemberSidebar } from './MemberSidebar';
 import { BottomNav, MobileHeader } from './BottomNav';
 import { cn } from '@/components/ui/cn';
@@ -21,17 +20,18 @@ import { ErrorBoundary, FeatureErrorFallback } from '@/components/ui';
 
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
-  const { socket, status, connect, on, isConnected } = useSocket();
-  const setLastMessageId = useMessageStore((s) => s.setLastMessageId);
+  const { socket, status, connect, emit, on, isConnected } = useSocket();
   const { currentServerId, servers, fetchServers, setCurrentServerId } = useServerStore();
   const { fetchChannels, setCurrentChannelId } = useChannelStore();
   const {
     isChannelListOpen,
     isMemberSidebarOpen,
     isServerListOpen,
+    setChannelListOpen,
+    setMemberSidebarOpen,
     closeAllDrawers
   } = useUIStore();
-  const { isMobile, isTablet } = useBreakpoints();
+  const { isMobile } = useBreakpoints();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
 
@@ -68,45 +68,54 @@ export function AppShell() {
     }
   }, [user, status, connect]);
 
-  // Set up socket event handlers
+  // Set up socket event handlers. Message rows and their catch-up cursor
+  // live in the message store's own listeners (useMessages) — advancing
+  // lastMessageId here for messages that were never stored (background
+  // channels) would skip exactly the gap catch-up exists to fill.
   useEffect(() => {
     if (!socket) return;
-
-    const cleanupCreate = on('message_create', (message) => {
-      setLastMessageId(message.channelId, message.id);
-    });
-
-    const cleanupUpdate = on('message_update', (message) => {
-      setLastMessageId(message.channelId, message.id);
-    });
-
-    const cleanupDelete = on('message_delete', () => {});
 
     const cleanupViolation = on('policy_violation', () => {
       toast.error('Disconnected', 'Too many requests. Please sign in again.');
       useAuthStore.getState().logout();
     });
 
-    return () => {
-      cleanupCreate();
-      cleanupUpdate();
-      cleanupDelete();
-      cleanupViolation();
-    };
-  }, [socket, setLastMessageId, on]);
+    const channelStore = useChannelStore.getState();
+    const cleanupChannelAdded = on('channel_added', ({ channelId }) => {
+      channelStore.onChannelAdded(channelId);
+    });
+    const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
+      channelStore.onChannelRemoved(channelId);
+    });
 
-  // Emit catch_up on reconnect
+    return () => {
+      cleanupViolation();
+      cleanupChannelAdded();
+      cleanupChannelRemoved();
+    };
+  }, [socket, on]);
+
+  // Catch up on reconnect: every channel the client holds state for, in one
+  // frame (not one per channel — that's the reconnection storm the frame
+  // exists to avoid). The reply lives only in the ack, so it has to be
+  // awaited and applied; a fire-and-forget emit fetched nothing.
   useEffect(() => {
-    if (!isConnected || !socket) return;
+    if (!isConnected) return;
 
     const channels = Array.from(useMessageStore.getState().lastMessageIds.entries()).map(
       ([channelId, afterMessageId]) => ({ channelId, afterMessageId })
     );
+    if (channels.length === 0) return;
 
-    if (channels.length > 0) {
-      socket.emit('catch_up', { channels });
-    }
-  }, [isConnected, socket]);
+    void (async () => {
+      try {
+        const reply = await emit('catch_up', { channels });
+        await applyCatchUpReply(reply);
+      } catch (error) {
+        console.error('Catch-up failed:', error);
+      }
+    })();
+  }, [isConnected, emit]);
 
   // Redirect to first server if on /app with no server selected
   useEffect(() => {
@@ -115,19 +124,56 @@ export function AppShell() {
     }
   }, [currentServerId, servers, navigate]);
 
+  // Seed drawer defaults for this viewport on every load. Desktop opens the
+  // channel list and member list; mobile keeps every drawer closed so the
+  // chat is the first thing shown.
+  useEffect(() => {
+    if (isMobile) {
+      closeAllDrawers();
+    } else {
+      setChannelListOpen(true);
+      setMemberSidebarOpen(true);
+    }
+  }, [isMobile, closeAllDrawers, setChannelListOpen, setMemberSidebarOpen]);
+
+  // Escape closes mobile drawers. The scrim itself is never focusable, so
+  // the handler has to live on the window.
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!isChannelListOpen && !isMemberSidebarOpen && !isServerListOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeAllDrawers();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMobile, isChannelListOpen, isMemberSidebarOpen, isServerListOpen, closeAllDrawers]);
+
+  // Drawer tops/bottoms clear the fixed mobile header (4rem) and bottom nav
+  // (4rem + safe-area inset), which env() can't be composed into Tailwind
+  // arbitrary values cleanly on every device.
+  const drawerClip = {
+    top: '4rem',
+    bottom: 'calc(4rem + env(safe-area-inset-bottom, 0px))',
+  } as const;
+
   return (
     <div className="h-dvh bg-bg-base flex flex-col overflow-hidden">
       {/* Mobile Header */}
       <MobileHeader />
 
       <div className="flex-1 flex overflow-hidden min-w-0">
-        {/* Server List - Always visible on desktop/tablet, modal on mobile */}
+        {/* Server rail — fixed drawer on mobile, in-flow column otherwise */}
         <div className={cn(
-          'flex-shrink-0 z-30',
-          'w-16',
-          isMobile && !isServerListOpen && '-translate-x-full',
-          isMobile && isServerListOpen && 'translate-x-0 fixed top-16 bottom-16 left-0 bg-bg-raised border-r border-border-subtle shadow-xl z-30',
-        )}>
+          'flex-shrink-0 h-full min-w-0 transition-all duration-200',
+          isMobile
+            ? (isServerListOpen
+              ? 'w-16 fixed left-0 bg-bg-raised border-r border-border-subtle shadow-xl z-30 animate-in slide-in-from-left-2'
+              : 'w-0 overflow-hidden')
+            : 'w-16'
+        )}
+          style={isMobile && isServerListOpen ? drawerClip : undefined}
+        >
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Servers" description="Failed to load your servers" onRetry={() => fetchServers()} />}
             resetKeys={[currentServerId]}
@@ -136,14 +182,21 @@ export function AppShell() {
           </ErrorBoundary>
         </div>
 
-        {/* Channel List - Collapsible drawer on tablet, modal on mobile */}
+        {/* Channel list — collapsible everywhere, drawer on mobile. Sits
+            beside the server rail only while that rail is open; otherwise it
+            hugs the left edge instead of leaving a dead strip. */}
         <div className={cn(
-          'flex-shrink-0 z-20',
-          'w-64',
-          isTablet && !isChannelListOpen && 'w-0 overflow-hidden',
-          isMobile && !isChannelListOpen && '-translate-x-full fixed top-16 bottom-16 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
-          isMobile && isChannelListOpen && 'translate-x-0 fixed top-16 bottom-16 left-16 w-64 bg-bg-base border-r border-border-subtle shadow-xl z-20',
-        )}>
+          'flex-shrink-0 h-full min-w-0 transition-all duration-200',
+          isMobile
+            ? (isChannelListOpen
+              ? 'w-64 fixed bg-bg-base border-r border-border-subtle shadow-xl z-30 animate-in slide-in-from-left-2'
+              : 'w-0 overflow-hidden')
+            : (isChannelListOpen ? 'w-64' : 'w-0 overflow-hidden')
+        )}
+          style={isMobile && isChannelListOpen
+            ? { ...drawerClip, left: isServerListOpen ? '4rem' : '0px' }
+            : undefined}
+        >
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Channels" description="Failed to load channels" onRetry={() => currentServerId && fetchChannels(currentServerId)} />}
             resetKeys={[currentServerId]}
@@ -152,27 +205,27 @@ export function AppShell() {
           </ErrorBoundary>
         </div>
 
-        {/* Message Pane - Center, flex-1 */}
-        <div className={cn(
-          'flex-1 min-w-0 flex flex-col overflow-hidden',
-          'lg:max-w-3xl lg:mx-auto'
-        )}>
+        {/* Message pane / settings — center, flex-1 */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => params.channelId && apiClient.get(`/channels/${params.channelId}/messages`)} />}
             resetKeys={[params.channelId]}
           >
-            <MessagePane />
+            <Outlet />
           </ErrorBoundary>
         </div>
 
-        {/* Member Sidebar - Collapsible drawer on tablet, modal on mobile */}
+        {/* Member sidebar — collapsible everywhere, drawer on mobile */}
         <div className={cn(
-          'flex-shrink-0 z-10',
-          'w-64',
-          isTablet && !isMemberSidebarOpen && 'w-0 overflow-hidden',
-          isMobile && !isMemberSidebarOpen && 'translate-x-full fixed top-16 bottom-16 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
-          isMobile && isMemberSidebarOpen && 'translate-x-0 fixed top-16 bottom-16 right-0 w-64 bg-bg-base border-l border-border-subtle shadow-xl z-10',
-        )}>
+          'flex-shrink-0 h-full min-w-0 transition-all duration-200',
+          isMobile
+            ? (isMemberSidebarOpen
+              ? 'w-64 fixed right-0 bg-bg-base border-l border-border-subtle shadow-xl z-30 animate-in slide-in-from-right-2'
+              : 'w-0 overflow-hidden')
+            : (isMemberSidebarOpen ? 'w-64' : 'w-0 overflow-hidden')
+        )}
+          style={isMobile && isMemberSidebarOpen ? drawerClip : undefined}
+        >
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Members" description="Failed to load members" onRetry={() => currentServerId && useChannelStore.getState().listServerMembers(currentServerId)} />}
             resetKeys={[currentServerId]}
@@ -182,19 +235,19 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Overlay for mobile drawers */}
+      {/* Scrim for mobile drawers — below the drawers (z-30), above content */}
       {(isMobile && (isChannelListOpen || isMemberSidebarOpen || isServerListOpen)) && (
         <div
-          className="fixed inset-0 bg-black/50 z-15 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-20"
           onClick={closeAllDrawers}
-          aria-hidden="true"
+          role="button"
+          tabIndex={-1}
+          aria-label="Close menu"
         />
       )}
 
       {/* Bottom Navigation - Mobile only */}
       <BottomNav />
-
-      <Toaster />
     </div>
   );
 }

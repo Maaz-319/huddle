@@ -1,16 +1,20 @@
 import { useSyncExternalStore } from 'react';
 
-const MOBILE_QUERY = '(max-width: 639px)';
-const TABLET_QUERY = '(min-width: 640px) and (max-width: 1023px)';
+/**
+ * Single source of truth for "mobile mode": anything below the desktop
+ * three-column layout gets the mobile header, bottom nav, and drawer-based
+ * sidebars. Matches the CSS `lg:` breakpoint so the two can never disagree.
+ */
+const MOBILE_QUERY = '(max-width: 1023px)';
 
-function subscribe(query: string, callback: () => void) {
-  const mql = window.matchMedia(query);
+function subscribe(callback: () => void) {
+  const mql = window.matchMedia(MOBILE_QUERY);
   mql.addEventListener('change', callback);
   return () => mql.removeEventListener('change', callback);
 }
 
-function getSnapshot(query: string) {
-  return window.matchMedia(query).matches;
+function getSnapshot() {
+  return window.matchMedia(MOBILE_QUERY).matches;
 }
 
 function getServerSnapshot() {
@@ -18,17 +22,6 @@ function getServerSnapshot() {
 }
 
 export function useBreakpoints() {
-  const isMobile = useSyncExternalStore(
-    (cb) => subscribe(MOBILE_QUERY, cb),
-    () => getSnapshot(MOBILE_QUERY),
-    getServerSnapshot,
-  );
-
-  const isTablet = useSyncExternalStore(
-    (cb) => subscribe(TABLET_QUERY, cb),
-    () => getSnapshot(TABLET_QUERY),
-    getServerSnapshot,
-  );
-
-  return { isMobile, isTablet };
+  const isMobile = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return { isMobile };
 }

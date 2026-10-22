@@ -1,42 +1,23 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/components/ui/cn';
-import { Search, X } from 'lucide-react';
+import { Search, X, Settings } from 'lucide-react';
 import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { usePresenceStore } from '@/stores/presenceStore';
+import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/api/auth';
+import { apiClient } from '@/api/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface Member {
   id: string;
   username: string;
   avatarUrl: string | null;
   role: 'owner' | 'moderator' | 'member';
-  isOnline: boolean;
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((word) => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-function getColorFromString(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 70%, 45%)`;
-}
-
-function getStatusColor(isOnline: boolean): string {
-  return isOnline ? 'bg-green-500' : 'bg-gray-500';
 }
 
 function getRoleBadge(role: Member['role']) {
@@ -58,7 +39,7 @@ function getRoleBadge(role: Member['role']) {
   }
 }
 
-function MemberItem({ member }: { member: Member }) {
+function MemberItem({ member, isOnline }: { member: Member; isOnline: boolean }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg">
       <div className="relative">
@@ -79,7 +60,7 @@ function MemberItem({ member }: { member: Member }) {
         <span
           className={cn(
             'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base',
-            getStatusColor(member.isOnline)
+            isOnline ? 'bg-green-500' : 'bg-gray-500'
           )}
         />
       </div>
@@ -91,12 +72,43 @@ function MemberItem({ member }: { member: Member }) {
   );
 }
 
+function UserCard() {
+  const user = useAuthStore((s) => s.user);
+  const navigate = useNavigate();
 
+  if (!user) return null;
+
+  return (
+    <div className="shrink-0 border-t border-border-subtle p-2">
+      <button
+        onClick={() => navigate({ to: '/app/settings' })}
+        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 hover:bg-bg-raised transition-colors text-left"
+        aria-label="Open your settings"
+      >
+        {user.avatarUrl ? (
+          <img src={user.avatarUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+        ) : (
+          <div
+            className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
+            style={{ backgroundColor: getColorFromString(user.username) }}
+          >
+            {getInitials(user.username)}
+          </div>
+        )}
+        <span className="flex-1 min-w-0 truncate text-sm font-medium text-text-primary">
+          {user.username}
+        </span>
+        <Settings className="h-4 w-4 text-text-muted" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
 
 export function MemberSidebar() {
   const { currentServerId } = useServerStore();
   const { listServerMembers } = useChannelStore();
-  const { isOnline, setSnapshot } = usePresenceStore();
+  const setSnapshot = usePresenceStore((s) => s.setSnapshot);
+  const onlineUserIds = usePresenceStore((s) => s.onlineUserIds);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -127,13 +139,27 @@ export function MemberSidebar() {
             username: user?.username ?? 'Unknown User',
             avatarUrl: user?.avatarUrl ?? null,
             role: m.role,
-            isOnline: isOnline(m.userId),
           };
         });
 
         if (mounted) {
           setMembers(enrichedMembers);
-          setSnapshot(userIds);
+          // Snapshot only the subset that is actually online — seeding the
+          // set with every member id would render everyone green.
+          if (userIds.length > 0) {
+            try {
+              const snapshot = await apiClient.get<{ online: string[] }>(
+                `/presence/snapshot?userIds=${userIds.join(',')}`
+              );
+              if (mounted) setSnapshot(snapshot.online);
+            } catch (presenceError) {
+              // Presence is cosmetic; the member list still stands.
+              console.error('Failed to load presence snapshot:', presenceError);
+              if (mounted) setSnapshot([]);
+            }
+          } else {
+            setSnapshot([]);
+          }
         }
       } catch (error) {
         console.error('Failed to load members:', error);
@@ -152,7 +178,7 @@ export function MemberSidebar() {
     return () => {
       mounted = false;
     };
-  }, [currentServerId, listServerMembers, isOnline, setSnapshot]);
+  }, [currentServerId, listServerMembers, setSnapshot]);
 
   // Filter members based on search query
   const filteredMembers = useMemo(() => {
@@ -161,28 +187,28 @@ export function MemberSidebar() {
     return members.filter((m) => m.username.toLowerCase().includes(query));
   }, [members, searchQuery]);
 
-  // Sort: online first, then by role (owner > moderator > member)
+  // Sort: online first (live, without refetching), then by role
   const sortedMembers = useMemo(() => {
+    const roleOrder = { owner: 0, moderator: 1, member: 2 } as const;
     return [...filteredMembers].sort((a, b) => {
-      // Online first
-      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-      // Then by role
-      const roleOrder = { owner: 0, moderator: 1, member: 2 };
+      const aOnline = onlineUserIds.has(a.id);
+      const bOnline = onlineUserIds.has(b.id);
+      if (aOnline !== bOnline) return aOnline ? -1 : 1;
       return roleOrder[a.role] - roleOrder[b.role];
     });
-  }, [filteredMembers]);
+  }, [filteredMembers, onlineUserIds]);
 
   // Virtualizer for large member lists
   const virtualizer = useVirtualizer({
     count: sortedMembers.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 52,
+    estimateSize: () => 48,
     overscan: 5,
   });
 
   if (!currentServerId) {
     return (
-      <div className="flex flex-col h-full w-64 bg-bg-base border-l border-border-subtle">
+      <div className="flex flex-col h-full w-full bg-bg-base border-l border-border-subtle">
         <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
           <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Members</h2>
         </div>
@@ -195,7 +221,7 @@ export function MemberSidebar() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full w-64 bg-bg-base border-l border-border-subtle">
+      <div className="flex flex-col h-full w-full bg-bg-base border-l border-border-subtle">
         <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
           <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Members</h2>
           <span className="text-text-muted text-xs animate-pulse">...</span>
@@ -215,11 +241,7 @@ export function MemberSidebar() {
   }
 
   return (
-    <div className={cn(
-      'flex flex-col h-full bg-bg-base border-l border-border-subtle transition-all duration-200',
-      'w-64',
-      'lg:w-64'
-    )}>
+    <div className="flex flex-col h-full w-full bg-bg-base border-l border-border-subtle">
       <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Members</h2>
         <span className="text-text-muted text-xs">{members.length}</span>
@@ -254,38 +276,42 @@ export function MemberSidebar() {
       {/* Member list */}
       <nav
         ref={parentRef}
-        className="flex-1 overflow-y-auto relative"
+        className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
         role="navigation"
         aria-label="Members"
       >
-        <div className="px-2 py-2 space-y-1" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-          {sortedMembers.length === 0 && (
-            <div className="flex items-center justify-center px-4 py-4">
-              <p className="text-text-muted text-sm">
-                {searchQuery ? 'No members match your search' : 'No members in this server'}
-              </p>
-            </div>
-          )}
-
-          {virtualizer.getVirtualItems().map((virtualRow) => (
-            <div
-              key={sortedMembers[virtualRow.index]?.id}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: `${virtualRow.size}px`,
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              {sortedMembers[virtualRow.index] && (
-                <MemberItem member={sortedMembers[virtualRow.index]} />
-              )}
-            </div>
-          ))}
-        </div>
+        {sortedMembers.length === 0 ? (
+          <div className="flex items-center justify-center px-4 py-4">
+            <p className="text-text-muted text-sm">
+              {searchQuery ? 'No members match your search' : 'No members in this server'}
+            </p>
+          </div>
+        ) : (
+          <div className="relative" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const member = sortedMembers[virtualRow.index];
+              if (!member) return null;
+              return (
+                <div
+                  key={member.id}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <MemberItem member={member} isOnline={onlineUserIds.has(member.id)} />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </nav>
+      <UserCard />
     </div>
   );
 }

@@ -21,6 +21,9 @@ interface ChannelStore {
   addChannelMember: (channelId: string, userId: string) => Promise<ChannelMemberResponse>;
   removeChannelMember: (channelId: string, userId: string) => Promise<void>;
   setCurrentChannelId: (id: string | null) => void;
+  // Real-time access reconcile events (bare { channelId } payloads)
+  onChannelAdded: (channelId: string) => Promise<void>;
+  onChannelRemoved: (channelId: string) => void;
 }
 
 export const useChannelStore = create<ChannelStore>((set) => ({
@@ -113,4 +116,35 @@ export const useChannelStore = create<ChannelStore>((set) => ({
   },
 
   setCurrentChannelId: (id) => set({ currentChannelId: id }),
+
+  onChannelAdded: async (channelId) => {
+    // The event is a bare id — fetch the channel to learn its server.
+    try {
+      const channel = await apiClient.get<ChannelResponse>(`/channels/${channelId}`);
+      set((state) => {
+        const newMap = new Map(state.channelsByServer);
+        const existing = newMap.get(channel.serverId) ?? [];
+        if (existing.some((c) => c.id === channel.id)) return state;
+        newMap.set(channel.serverId, [...existing, channel]);
+        return { channelsByServer: newMap };
+      });
+    } catch (error) {
+      console.error('Failed to apply channel_added:', error);
+    }
+  },
+
+  onChannelRemoved: (channelId) => {
+    set((state) => {
+      const newMap = new Map(state.channelsByServer);
+      for (const [serverId, channels] of newMap.entries()) {
+        if (channels.some((c) => c.id === channelId)) {
+          newMap.set(serverId, channels.filter((c) => c.id !== channelId));
+        }
+      }
+      return {
+        channelsByServer: newMap,
+        currentChannelId: state.currentChannelId === channelId ? null : state.currentChannelId,
+      };
+    });
+  },
 }));

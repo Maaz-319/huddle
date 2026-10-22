@@ -15,7 +15,9 @@
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;
   --color-accent-electric: #00ff88;
-  --color-accent-primary: #5865f2;
+  /* Single accent: primary IS the electric green. Never pair with white
+     text — green is bright; use text-bg-base on green fills. */
+  --color-accent-primary: #00ff88;
   --color-accent-warn: #ed4245;
   --color-accent-muted: #4f545c;
 
@@ -53,6 +55,109 @@
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
+:root {
+  /* Vertical rhythm inside the transcript; SettingsPage writes this at runtime. */
+  --msg-gap: 8px;
+}
+
+/*
+ * Icons are flex items by default and shrink below their h/w box in tight
+ * rows, which is the "icons cut off" symptom. Never let them.
+ */
+svg {
+  flex-shrink: 0;
+}
+
+@utility safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+@utility safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/*
+ * Composable enter/exit animations — the subset of tailwindcss-animate this
+ * app uses (`animate-in fade-in-0 zoom-in-95`, `animate-out slide-out-to-top-4`,
+ * …). Direction utilities set vars consumed by one keyframe each, so
+ * combinations compose exactly like the plugin did.
+ */
+@keyframes huddle-enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1);
+  }
+}
+
+@keyframes huddle-exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+      scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1);
+  }
+}
+
+@utility animate-in {
+  animation-name: huddle-enter;
+  animation-duration: 150ms;
+  animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@utility animate-out {
+  animation-name: huddle-exit;
+  animation-duration: 100ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@utility fade-in-0 {
+  --tw-enter-opacity: 0;
+}
+
+@utility fade-out-0 {
+  --tw-exit-opacity: 0;
+}
+
+@utility zoom-in-95 {
+  --tw-enter-scale: 0.95;
+}
+
+@utility zoom-out-95 {
+  --tw-exit-scale: 0.95;
+}
+
+@utility slide-in-from-top-2 {
+  --tw-enter-translate-y: -0.5rem;
+}
+
+@utility slide-in-from-top-4 {
+  --tw-enter-translate-y: -1rem;
+}
+
+@utility slide-out-to-top-4 {
+  --tw-exit-translate-y: -1rem;
+}
+
+@utility slide-in-from-bottom-2 {
+  --tw-enter-translate-y: 0.5rem;
+}
+
+@utility slide-in-from-right {
+  --tw-enter-translate-x: 1rem;
+}
+
+@utility slide-in-from-right-2 {
+  --tw-enter-translate-x: 0.5rem;
+}
+
+@utility slide-in-from-right-full {
+  --tw-enter-translate-x: 100%;
+}
+
+@utility slide-in-from-left-2 {
+  --tw-enter-translate-x: -0.5rem;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -66,14 +171,14 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   line-height: 1.5;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -110,7 +215,7 @@ body {
 /* Selection */
 ::selection {
   background: var(--color-accent-primary);
-  color: white;
+  color: var(--color-bg-base);
 }
 
 /* Reduced motion */

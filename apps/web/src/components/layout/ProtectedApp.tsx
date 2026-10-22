@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
-import { AppShell } from './AppShell';
 import { cn } from '@/components/ui/cn';
+import { Toaster } from '@/components/ui';
 
 function LoadingSpinner() {
   return (
@@ -12,6 +12,11 @@ function LoadingSpinner() {
   );
 }
 
+/**
+ * Auth gate for every /app/* route. The shell itself is decided by the child
+ * layout routes: chat routes mount AppShell (three columns / drawers),
+ * settings routes mount SettingsShell (full-screen).
+ */
 export function ProtectedApp() {
   const { user, isHydrated, hydrate } = useAuthStore();
   const navigate = useNavigate();
@@ -33,5 +38,12 @@ export function ProtectedApp() {
     return <LoadingSpinner />;
   }
 
-  return <AppShell />;
+  return (
+    <>
+      <Outlet />
+      {/* Toaster lives at the auth boundary so settings routes get
+          notifications too, not only the chat shell. */}
+      <Toaster />
+    </>
+  );
 }
