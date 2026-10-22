@@ -132,6 +132,16 @@ describe('the channel message routes (e2e)', () => {
     if (keys.length > 0) await redis.del(...keys);
   }
 
+  /**
+   * Messages in one channel this suite just seeded. Scoped rather than a
+   * table-wide count because the e2e app points at the dev database, where a
+   * leftover row from manual testing would otherwise trip every "wrote
+   * nothing" assertion — what each case cares about is its own channel.
+   */
+  async function countIn(channelId: string): Promise<number> {
+    return prisma.message.count({ where: { channelId: BigInt(channelId) } });
+  }
+
   interface Seeded {
     serverId: string;
     /** A public channel everyone in the server can see. */
@@ -214,6 +224,17 @@ describe('the channel message routes (e2e)', () => {
         where: { id: BigInt(idOf(response.body)) },
       });
       expect(stored?.content).toBe('hello there');
+
+      // The hydrated author, matching both the response's own authorId and
+      // the row's foreign key — the shape the web client crashed reading
+      // when it was missing.
+      const body = response.body as Record<string, unknown>;
+      expect(body['author']).toEqual({
+        id: body['authorId'],
+        username: MEMBER.login,
+        avatarUrl: 'https://avatars.example.com/4',
+      });
+      expect(stored?.authorId.toString()).toBe(body['authorId']);
     });
 
     it('serialises every id as a JSON string, never a number', async () => {
@@ -283,7 +304,7 @@ describe('the channel message routes (e2e)', () => {
 
       expect(response.status).toBe(400);
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
-      await expect(prisma.message.count()).resolves.toBe(0);
+      await expect(countIn(channelId)).resolves.toBe(0);
     });
 
     it('rejects whitespace-only content with 400', async () => {
@@ -295,7 +316,7 @@ describe('the channel message routes (e2e)', () => {
 
       expect(response.status).toBe(400);
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
-      await expect(prisma.message.count()).resolves.toBe(0);
+      await expect(countIn(channelId)).resolves.toBe(0);
     });
 
     it('rejects content over the character cap with 400', async () => {
@@ -307,7 +328,7 @@ describe('the channel message routes (e2e)', () => {
 
       expect(response.status).toBe(400);
       expect(errorOf(response.body).code).toBe('VALIDATION_FAILED');
-      await expect(prisma.message.count()).resolves.toBe(0);
+      await expect(countIn(channelId)).resolves.toBe(0);
     });
   });
 
@@ -325,7 +346,7 @@ describe('the channel message routes (e2e)', () => {
       // 403 rather than 404: the member can still *see* the channel, so there
       // is nothing left to hide. See RequireCapabilityGuard's own doc.
       expect(response.status).toBe(403);
-      await expect(prisma.message.count()).resolves.toBe(0);
+      await expect(countIn(channelId)).resolves.toBe(0);
     });
 
     it('still lets the member post in a sibling channel the override did not touch', async () => {
@@ -351,7 +372,7 @@ describe('the channel message routes (e2e)', () => {
       // The hiding rule: a private channel is invisible, so the refusal must
       // not admit the id exists.
       expect(response.status).toBe(404);
-      await expect(prisma.message.count()).resolves.toBe(0);
+      await expect(countIn(privateChannelId)).resolves.toBe(0);
     });
 
     it('gives 404 to someone who is not in the server at all', async () => {
@@ -393,7 +414,7 @@ describe('the channel message routes (e2e)', () => {
       expect(response.status).toBe(429);
       expect(Number(response.headers['retry-after'])).toBeGreaterThanOrEqual(1);
       // The handler never ran: the burst is stored, the rejected send is not.
-      await expect(prisma.message.count()).resolves.toBe(SEND_CAPACITY);
+      await expect(countIn(channelId)).resolves.toBe(SEND_CAPACITY);
     });
 
     it('does not spend another channel’s budget on the same burst', async () => {
@@ -677,11 +698,23 @@ describe('the channel message routes (e2e)', () => {
     }
 
     function pageOf(body: unknown): {
-      messages: { id: string; content: string | null; isDeleted: boolean }[];
+      messages: {
+        id: string;
+        authorId: string;
+        author: { id: string; username: string; avatarUrl: string };
+        content: string | null;
+        isDeleted: boolean;
+      }[];
       hasMore: boolean;
     } {
       return body as {
-        messages: { id: string; content: string | null; isDeleted: boolean }[];
+        messages: {
+          id: string;
+          authorId: string;
+          author: { id: string; username: string; avatarUrl: string };
+          content: string | null;
+          isDeleted: boolean;
+        }[];
         hasMore: boolean;
       };
     }
@@ -700,6 +733,15 @@ describe('the channel message routes (e2e)', () => {
       expect(page.messages[page.messages.length - 1]?.id).toBe(
         ids[ids.length - 1],
       );
+      // History is the payload that crashed the web client when `author`
+      // was absent — every message on the page carries it, hydrated.
+      for (const message of page.messages) {
+        expect(message.author).toEqual({
+          id: message.authorId,
+          username: MEMBER.login,
+          avatarUrl: 'https://avatars.example.com/4',
+        });
+      }
     });
 
     it('pages backwards with ?before=, oldest → newest within the page', async () => {

@@ -8,6 +8,7 @@ import {
   hiddenChannelError,
 } from '../auth/capability-refusal';
 import { resolveCapability } from '../auth/resolve-capability';
+import { UserRepository } from '../auth/user-repository.interface';
 import {
   ForbiddenError,
   NotFoundError,
@@ -25,10 +26,30 @@ export interface HistoryCursor {
   after?: bigint;
 }
 
+/**
+ * A message with its author hydrated — what this service returns to both
+ * transports. The wire shape (`toMessageResponse`) reads username and
+ * avatar straight off this, so history, the REST routes, the
+ * `message_create` / `message_update` broadcasts, and catch-up all carry the
+ * author without a second lookup at each call site.
+ *
+ * The port `Message` deliberately stays author-free (message-repository
+ * interface.ts): joining users is composition, not persistence, and the
+ * `User` row can never be missing while the message exists (both foreign
+ * keys are Restrict — data-model.md section 7).
+ */
+export interface MessageWithAuthor extends Message {
+  author: {
+    id: bigint;
+    username: string;
+    avatarUrl: string;
+  };
+}
+
 /** One page of history, plus whether the direction asked for has more. */
 export interface MessagePage {
   /** Always oldest → newest, whichever cursor was sent. */
-  messages: Message[];
+  messages: MessageWithAuthor[];
 
   /** Whether at least one more row exists past this page, that way. */
   hasMore: boolean;
@@ -61,6 +82,7 @@ export class ChatService {
     private readonly memberships: MembershipRepository,
     private readonly channelMembers: ChannelMemberRepository,
     private readonly channelOverrides: ChannelOverrideRepository,
+    private readonly users: UserRepository,
   ) {}
 
   /**
@@ -72,13 +94,23 @@ export class ChatService {
    * `content` is already trimmed and length-checked by `SendMessageDto` (the
    * frame DTO extends it); the id and creation time both come from the
    * Snowflake the repository mints.
+   *
+   * The author is hydrated before returning because both callers shape the
+   * return straight into a `MessageResponse` — the REST route's 201 body
+   * doubles as the `message_create` broadcast, so one hydration covers both.
    */
-  postMessage(
+  async postMessage(
     channelId: bigint,
     authorId: bigint,
     content: string,
-  ): Promise<Message> {
-    return this.messages.create({ channelId, authorId, content });
+  ): Promise<MessageWithAuthor> {
+    const message = await this.messages.create({
+      channelId,
+      authorId,
+      content,
+    });
+
+    return this.withAuthor(message);
   }
 
   /**
@@ -165,7 +197,7 @@ export class ChatService {
     messageId: bigint,
     callerId: bigint,
     content: string,
-  ): Promise<Message> {
+  ): Promise<MessageWithAuthor> {
     const message = await this.messages.findById(messageId);
 
     if (message === null) {
@@ -193,7 +225,9 @@ export class ChatService {
       });
     }
 
-    return this.messages.updateContent(messageId, content);
+    const updated = await this.messages.updateContent(messageId, content);
+
+    return this.withAuthor(updated);
   }
 
   /**
@@ -335,8 +369,75 @@ export class ChatService {
     const page = hasMore ? rows.slice(0, limit) : rows;
 
     return {
-      messages: cursor.after === undefined ? page.reverse() : page,
+      messages: await this.withAuthors(
+        cursor.after === undefined ? page.reverse() : page,
+      ),
       hasMore,
     };
   }
+
+  /**
+   * Hydrates one message's author — a single `findById`. Used on the write
+   * paths, where the author is the caller and there is exactly one row.
+   *
+   * The author row cannot be missing: `Message.authorId` is a Restrict
+   * foreign key (data-model.md section 7), and account deletion is a
+   * soft-delete that leaves the row in place (auth-service.md section 6). A
+   * null here would mean the database's referential integrity was bypassed,
+   * so it fails loudly rather than rendering a nameless bubble.
+   */
+  private async withAuthor(message: Message): Promise<MessageWithAuthor> {
+    const author = await this.users.findById(message.authorId);
+
+    if (author === null) {
+      throw new NotFoundError('Author not found', {
+        authorId: message.authorId.toString(),
+      });
+    }
+
+    return toAuthored(message, author);
+  }
+
+  /**
+   * Hydrates a page of messages with **one** `findByIds` for the distinct
+   * authors on it, not one read per row — the page is the natural batch
+   * boundary, and history is the only read path that can hold many authors
+   * at once. Order is preserved: `findByIds` returns rows in the order
+   * requested (user-repository-interface.ts), but the lookup here is keyed
+   * by id anyway so a page of interleaved authors stays interleaved.
+   */
+  private async withAuthors(messages: Message[]): Promise<MessageWithAuthor[]> {
+    if (messages.length === 0) return [];
+
+    const authorIds = [...new Set(messages.map((message) => message.authorId))];
+    const authors = await this.users.findByIds(authorIds);
+    const byId = new Map(authors.map((author) => [author.id, author]));
+
+    return messages.map((message) => {
+      const author = byId.get(message.authorId);
+
+      if (author === undefined) {
+        throw new NotFoundError('Author not found', {
+          authorId: message.authorId.toString(),
+        });
+      }
+
+      return toAuthored(message, author);
+    });
+  }
+}
+
+/** Joins a stored message to its already-loaded author row. */
+function toAuthored(
+  message: Message,
+  author: { id: bigint; username: string; avatarUrl: string },
+): MessageWithAuthor {
+  return {
+    ...message,
+    author: {
+      id: author.id,
+      username: author.username,
+      avatarUrl: author.avatarUrl,
+    },
+  };
 }

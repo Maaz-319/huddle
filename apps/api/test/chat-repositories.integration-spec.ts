@@ -10,6 +10,8 @@ import { ChannelOverrideRepository } from '../src/administration/channel-overrid
 import { ChannelRepository } from '../src/administration/channel-repository.interface';
 import { MembershipRepository } from '../src/administration/membership-repository.interface';
 import { ServerRepository } from '../src/administration/server-repository.interface';
+import { PrismaUserRepository } from '../src/auth/adapters/prisma-user-repository.adapter';
+import { UserRepository } from '../src/auth/user-repository.interface';
 import { PrismaMessageRepository } from '../src/chat/adapters/prisma-message-repository.adapter';
 import { ChatService } from '../src/chat/chat.service';
 import { MessageRepository } from '../src/chat/message-repository.interface';
@@ -53,6 +55,7 @@ describe('the chat Prisma adapters', () => {
   let memberships: MembershipRepository;
   let channelMembers: ChannelMemberRepository;
   let channelOverrides: ChannelOverrideRepository;
+  let users: UserRepository;
 
   beforeAll(async () => {
     const mockLogger = {
@@ -88,6 +91,7 @@ describe('the chat Prisma adapters', () => {
           provide: ChannelOverrideRepository,
           useClass: PrismaChannelOverrideRepository,
         },
+        { provide: UserRepository, useClass: PrismaUserRepository },
       ],
     }).compile();
 
@@ -99,6 +103,7 @@ describe('the chat Prisma adapters', () => {
     memberships = module.get(MembershipRepository);
     channelMembers = module.get(ChannelMemberRepository);
     channelOverrides = module.get(ChannelOverrideRepository);
+    users = module.get(UserRepository);
   });
 
   afterAll(async () => {
@@ -227,6 +232,7 @@ describe('the chat Prisma adapters', () => {
         memberships,
         channelMembers,
         channelOverrides,
+        users,
       );
     });
 
@@ -248,6 +254,7 @@ describe('the chat Prisma adapters', () => {
       await seedMessages(limit * 2);
       const before = jest.spyOn(messages, 'findPageBefore');
       const byId = jest.spyOn(messages, 'findById');
+      const authorsById = jest.spyOn(users, 'findByIds');
 
       const page = await service.getHistory(channelId, {}, limit);
 
@@ -255,6 +262,14 @@ describe('the chat Prisma adapters', () => {
       expect(before).toHaveBeenCalledTimes(1);
       // The N+1 this rules out: a per-message read to fill in the response.
       expect(byId).not.toHaveBeenCalled();
+      // Authors hydrate as one batched query per page, not one per row —
+      // and every message on the page carries the author the fixture seeded.
+      expect(authorsById).toHaveBeenCalledTimes(1);
+      expect(
+        page.messages.every(
+          (message) => message.author.id === MESSAGE_AUTHOR_ID,
+        ),
+      ).toBe(true);
     });
 
     it('reads once for a forwards page too', async () => {

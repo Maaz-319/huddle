@@ -516,6 +516,11 @@ describe('editing and deleting messages over the socket (e2e)', () => {
       id: original.messageId,
       channelId: seeded.alpha,
       authorId: memberId.toString(),
+      author: {
+        id: memberId.toString(),
+        username: MEMBER.login,
+        avatarUrl: 'https://avatars.example.com/4',
+      },
       content: 'corrected text',
       createdAt: original.createdAt,
       editedAt: success.editedAt,

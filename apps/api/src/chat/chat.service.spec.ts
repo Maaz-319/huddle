@@ -10,10 +10,21 @@ import { FakeChannelRepository } from '../../test/fakes/fake-channel-repository'
 import { FakeMembershipRepository } from '../../test/fakes/fake-membership-repository';
 import { FakeMessageRepository } from '../../test/fakes/fake-message-repository';
 import { FakeServerRepository } from '../../test/fakes/fake-server-repository';
+import { FakeUserRepository } from '../../test/fakes/fake-user-repository';
 import { ChatService } from './chat.service';
 import { MessageRepository } from './message-repository.interface';
 
 const OWNER_ID = 350000000000000001n;
+
+const OWNER_PROFILE = {
+  id: OWNER_ID,
+  githubId: 'github-owner',
+  username: 'octocat',
+  avatarUrl: 'https://avatars.example.com/owner',
+  email: 'owner@example.test',
+  bio: null,
+  deletedAt: null,
+};
 
 describe('ChatService', () => {
   let service: ChatService;
@@ -23,6 +34,7 @@ describe('ChatService', () => {
   let memberships: FakeMembershipRepository;
   let channelMembers: FakeChannelMemberRepository;
   let channelOverrides: FakeChannelOverrideRepository;
+  let users: FakeUserRepository;
   let serverId: bigint;
   let channelId: bigint;
 
@@ -34,12 +46,15 @@ describe('ChatService', () => {
     memberships = new FakeMembershipRepository(store);
     channelMembers = new FakeChannelMemberRepository(store);
     channelOverrides = new FakeChannelOverrideRepository(store);
+    users = new FakeUserRepository();
+    users.seed(OWNER_PROFILE);
     service = new ChatService(
       messages,
       channels,
       memberships,
       channelMembers,
       channelOverrides,
+      users,
     );
 
     const { server } = await servers.createWithOwner(
@@ -81,7 +96,30 @@ describe('ChatService', () => {
       const message = await service.postMessage(channelId, OWNER_ID, 'hello');
 
       expect(message.content).toBe('hello');
-      await expect(messages.findById(message.id)).resolves.toEqual(message);
+
+      const stored = await messages.findById(message.id);
+      expect(stored).toEqual({
+        id: message.id,
+        channelId: message.channelId,
+        authorId: message.authorId,
+        content: 'hello',
+        editedAt: null,
+        isDeleted: false,
+        deletedAt: null,
+      });
+    });
+
+    it('hydrates the author onto the message it returns', async () => {
+      // The 201 body and the `message_create` broadcast are both shaped from
+      // this return value, so a missing author here is the TypeError the web
+      // app used to render as "Failed to load messages".
+      const message = await service.postMessage(channelId, OWNER_ID, 'hello');
+
+      expect(message.author).toEqual({
+        id: OWNER_ID,
+        username: 'octocat',
+        avatarUrl: 'https://avatars.example.com/owner',
+      });
     });
   });
 
@@ -185,6 +223,24 @@ describe('ChatService', () => {
 
       expect(edited.content).toBe('edited');
       expect(edited.editedAt).toBeInstanceOf(Date);
+    });
+
+    it('hydrates the author onto the edited message', async () => {
+      // `message_update` broadcasts this return value directly.
+      const message = await service.postMessage(channelId, OWNER_ID, 'mine');
+
+      const edited = await service.editMessage(
+        channelId,
+        message.id,
+        OWNER_ID,
+        'edited',
+      );
+
+      expect(edited.author).toEqual({
+        id: OWNER_ID,
+        username: 'octocat',
+        avatarUrl: 'https://avatars.example.com/owner',
+      });
     });
 
     it('throws NotFoundError for a nonexistent message', async () => {
@@ -484,6 +540,41 @@ describe('ChatService', () => {
         ids[0],
         ids[1],
       ]);
+    });
+
+    it('hydrates every message with its author in one batched read', async () => {
+      // Three messages, one distinct author: exactly one `findByIds`, and the
+      // duplicate ids collapsed. A per-row lookup would be three reads — the
+      // N+1 this shape of test exists to catch.
+      await seed(3);
+      const authorReads = jest.spyOn(users, 'findByIds');
+
+      const page = await service.getHistory(channelId, {}, 3);
+
+      expect(authorReads).toHaveBeenCalledTimes(1);
+      expect(authorReads).toHaveBeenCalledWith([OWNER_ID]);
+      for (const message of page.messages) {
+        expect(message.author).toEqual({
+          id: OWNER_ID,
+          username: 'octocat',
+          avatarUrl: 'https://avatars.example.com/owner',
+        });
+      }
+    });
+
+    it('fails loudly rather than returning a message with no author', async () => {
+      // The real database cannot produce this (Message.authorId is a
+      // Restrict foreign key), but a silent `author: undefined` is exactly
+      // the crash this hydration exists to prevent, so the guard gets a test.
+      await messages.create({
+        channelId,
+        authorId: 999n,
+        content: 'orphan',
+      });
+
+      await expect(service.getHistory(channelId, {}, 1)).rejects.toBeInstanceOf(
+        NotFoundError,
+      );
     });
   });
 });

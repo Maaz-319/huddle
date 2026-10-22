@@ -1,10 +1,11 @@
 import type { SnowflakeService } from '../common/snowflake.service';
-import type { Message } from './message-repository.interface';
+import type { MessageWithAuthor } from './chat.service';
 
 /**
  * The shape every message route and every `message_create` /
- * `message_update` broadcast carries — a `Message`, ids serialised per
- * AGENTS.md section 4.
+ * `message_update` broadcast carries — a `Message` with its author hydrated
+ * (ChatService composes the two ports; see chat.service.ts), ids serialised
+ * per AGENTS.md section 4.
  *
  * `createdAt` is present despite there being no such column: it is decoded
  * from the Snowflake id (docs/architecture/data-model.md section 3), so the
@@ -14,10 +15,17 @@ import type { Message } from './message-repository.interface';
  * message is still returned — history renders a "message deleted" placeholder
  * in its place (PRD FR-18/FR-19) — but its text never is.
  */
+export interface MessageAuthorResponse {
+  id: string;
+  username: string;
+  avatarUrl: string;
+}
+
 export interface MessageResponse {
   id: string;
   channelId: string;
   authorId: string;
+  author: MessageAuthorResponse;
   content: string | null;
   createdAt: string;
   editedAt: string | null;
@@ -35,13 +43,18 @@ export interface MessageResponse {
  * returns arrays of this shape.
  */
 export function toMessageResponse(
-  message: Message,
+  message: MessageWithAuthor,
   snowflakes: SnowflakeService,
 ): MessageResponse {
   return {
     id: message.id.toString(),
     channelId: message.channelId.toString(),
     authorId: message.authorId.toString(),
+    author: {
+      id: message.author.id.toString(),
+      username: message.author.username,
+      avatarUrl: message.author.avatarUrl,
+    },
     // Nulled rather than merely relied upon to be blank. #63 blanks the
     // stored value at delete time; this makes the response correct whether or
     // not that has happened, and keeps it correct for rows written before it.

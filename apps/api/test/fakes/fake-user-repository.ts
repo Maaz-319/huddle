@@ -114,6 +114,16 @@ export class FakeUserRepository extends UserRepository {
   }
 
   /**
+   * Puts a user in the store at a caller-chosen id. `create` mints ids from a
+   * counter, but a spec's fixtures need one stable id to reference across
+   * every test in the file — same reasoning as
+   * `FakeServerRepository.createWithOwner` living beside the port's methods.
+   */
+  seed(user: User): void {
+    this.users.set(user.id, { ...user });
+  }
+
+  /**
    * Hands out a copy, never the stored object. Without this a caller mutating
    * what it got back would silently rewrite the store — a difference from the
    * real adapter, which is exactly what a fake must not have.

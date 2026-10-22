@@ -414,6 +414,11 @@ describe('sending a message over the socket (e2e)', () => {
       id: success.messageId,
       channelId: seeded.alpha,
       authorId: memberId.toString(),
+      author: {
+        id: memberId.toString(),
+        username: MEMBER.login,
+        avatarUrl: 'https://avatars.example.com/4',
+      },
       content: 'hello from the member',
       createdAt: success.createdAt,
       editedAt: null,
