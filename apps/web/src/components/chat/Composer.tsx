@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/components/ui/cn';
 import { Button } from '@/components/ui/button';
-import { Send, Paperclip } from 'lucide-react';
+import { Send } from 'lucide-react';
 
 interface ComposerProps {
   onSend: (content: string) => Promise<void>;
@@ -124,15 +124,6 @@ export function Composer({
         </div>
         <div className="flex items-end gap-2">
           <Button
-            variant="ghost"
-            size="icon"
-            className="h-10 w-10 text-text-muted hover:text-text-primary"
-            aria-label="Attach file"
-            disabled={disabled}
-          >
-            <Paperclip className="h-5 w-5" />
-          </Button>
-          <Button
             onClick={handleSend}
             disabled={!content.trim() || disabled || isOverLimit}
             size="icon"
@@ -143,18 +134,20 @@ export function Composer({
           </Button>
         </div>
       </div>
-      
-      {/* Character counter */}
-      <div className="flex justify-end">
-        <span
-          className={cn(
-            'text-xs',
-            isOverLimit ? 'text-red-400' : isNearLimit ? 'text-yellow-400' : 'text-text-muted'
-          )}
-        >
-          {charCount}/{maxLength}
-        </span>
-      </div>
+
+      {/* Character counter — only near the limit, not a permanent 0/N */}
+      {isNearLimit && (
+        <div className="flex justify-end">
+          <span
+            className={cn(
+              'text-xs',
+              isOverLimit ? 'text-red-400' : 'text-yellow-400'
+            )}
+          >
+            {charCount}/{maxLength}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

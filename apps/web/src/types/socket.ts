@@ -7,17 +7,20 @@ export interface MessageResponse {
   id: string;
   channelId: string;
   authorId: string;
-  content: string;
-  createdAt: string;
-  editedAt: string | null;
   author: {
     id: string;
     username: string;
-    avatarUrl: string | null;
+    avatarUrl: string;
   };
+  // Nullable on the wire: a soft-deleted message still arrives (history
+  // renders a "message deleted" placeholder), but its text never does.
+  content: string | null;
+  createdAt: string;
+  editedAt: string | null;
+  isDeleted: boolean;
   // Client-side only fields for optimistic updates
   pending?: boolean;
-  isDeleted?: boolean;
+  failed?: boolean;
 }
 
 export interface MessageDeleteResponse {

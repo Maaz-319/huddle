@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { cn } from '@/components/ui/cn';
-import { MoreVertical, Edit, Trash2, Copy } from 'lucide-react';
-import { 
-  DropdownMenuRoot, 
-  DropdownMenuTrigger, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuSeparator 
+import { MoreVertical, Edit, Trash2, Copy, X, AlertCircle } from 'lucide-react';
+import {
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
 import type { MessageResponse } from '@/types/socket';
+import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface MessageProps {
   message: MessageResponse;
@@ -18,31 +19,39 @@ interface MessageProps {
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
+  onRetry?: (messageId: string) => Promise<void>;
+  onDiscard?: (messageId: string) => void;
 }
 
-export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessageProps) {
+export function Message({ message, isOwn, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [editContent, setEditContent] = useState(message.content);
+  const [editContent, setEditContent] = useState(message.content ?? '');
+  const [editFailed, setEditFailed] = useState(false);
 
   const isDeleted = message.isDeleted === true;
   const isPending = message.pending === true;
+  const isFailed = message.failed === true;
 
   const handleSaveEdit = async () => {
-    if (onEdit && editContent.trim() && editContent !== message.content) {
-      try {
-        await onEdit(message.id, editContent);
-        setIsEditing(false);
-      } catch (error) {
-        console.error('Failed to edit message:', error);
-      }
-    } else {
+    if (!onEdit || !editContent.trim() || editContent === message.content) {
       setIsEditing(false);
+      setEditFailed(false);
+      return;
+    }
+    try {
+      await onEdit(message.id, editContent);
+      setIsEditing(false);
+      setEditFailed(false);
+    } catch {
+      // Stay in edit mode so the draft isn't lost; surface the failure.
+      setEditFailed(true);
     }
   };
 
   const handleCancelEdit = () => {
-    setEditContent(message.content);
+    setEditContent(message.content ?? '');
     setIsEditing(false);
+    setEditFailed(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -74,11 +83,13 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessagePro
   return (
     <div
       className={cn(
-        'group relative flex gap-3 px-4 py-2',
+        'group relative flex gap-3 pr-2',
         'hover:bg-bg-raised/50',
         isPending && 'opacity-60',
+        isFailed && 'opacity-80',
         isDeleted && 'text-text-muted italic'
       )}
+      style={{ paddingBlock: 'var(--msg-gap, 8px)', paddingLeft: '1rem' }}
       data-message-id={message.id}
     >
       <div className="relative flex-shrink-0 w-8 h-8">
@@ -91,19 +102,17 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessagePro
         ) : (
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
-            style={{
-              backgroundColor: `hsl(${message.author.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360}, 70%, 45%)`,
-            }}
+            style={{ backgroundColor: getColorFromString(message.author.username) }}
           >
-            {message.author.username.slice(0, 2).toUpperCase()}
+            {getInitials(message.author.username)}
           </div>
         )}
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2">
-          <span className="font-medium text-sm text-text-primary">{message.author.username}</span>
-          {message.author.id === 'current-user' && (
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="font-medium text-sm text-text-primary truncate max-w-[60%]">{message.author.username}</span>
+          {isOwn && (
             <span className="text-xs text-text-muted px-1.5 py-0.5 bg-bg-raised rounded">You</span>
           )}
           <time
@@ -113,7 +122,7 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessagePro
           >
             {formatTimestamp(message.createdAt)}
           </time>
-          {message.editedAt && (
+          {message.editedAt && !isPending && (
             <span
               className="text-xs text-text-muted"
               title={absoluteTime(message.editedAt)}
@@ -124,63 +133,113 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessagePro
         </div>
 
         {isEditing ? (
-          <textarea
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={handleSaveEdit}
-            autoFocus
-            rows={3}
-            className="w-full min-h-[44px] max-h-[60vh] px-3 py-2 bg-bg-raised border border-border-subtle rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-electric resize-none"
-            placeholder="Edit message..."
-          />
+          <div className="mt-1 space-y-1.5">
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              rows={3}
+              className="w-full min-h-[44px] max-h-[40vh] px-3 py-2 bg-bg-raised border border-border-subtle rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-electric resize-none"
+              placeholder="Edit message..."
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={handleSaveEdit}
+                disabled={!editContent.trim() || editContent === message.content}
+              >
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleCancelEdit}>
+                Cancel
+              </Button>
+              {editFailed && (
+                <span className="text-xs text-accent-warn flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Failed to save
+                </span>
+              )}
+              <span className="text-xs text-text-muted ml-auto">Esc to cancel</span>
+            </div>
+          </div>
         ) : (
           <div
             className={cn(
               'text-text-primary whitespace-pre-wrap break-words',
-              'max-w-[calc(100%-2rem)]',
               isDeleted && 'text-text-muted italic'
             )}
           >
-            {message.content}
+            {isDeleted ? 'message deleted' : message.content}
           </div>
         )}
 
-        {!isEditing && (isOwn || message.author.id === 'current-user') && (
+        {isFailed && !isEditing && (
+          <div className="flex items-center gap-2 mt-1 text-xs text-accent-warn">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            <span>Failed to send.</span>
+            {onRetry && (
+              <button
+                onClick={() => onRetry(message.id)}
+                className="underline hover:text-text-primary transition-colors"
+              >
+                Retry
+              </button>
+            )}
+            {onDiscard && (
+              <button
+                onClick={() => onDiscard(message.id)}
+                className="underline hover:text-text-primary transition-colors"
+              >
+                Discard
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Action gutter — reserved width so the menu never covers content.
+          Hidden until hover on desktop; always visible on touch. */}
+      <div className="flex-shrink-0 w-8 self-start mt-0.5">
+        {!isEditing && !isDeleted && (
           <DropdownMenuRoot>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 -mr-2 h-6 w-6 p-0"
+                className={cn(
+                  'h-7 w-7 p-0',
+                  'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity',
+                  'pointer-coarse:opacity-100'
+                )}
                 aria-label="Message options"
               >
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[160px]">
-              {!isDeleted && (
-                <>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setIsEditing(true);
-                      setEditContent(message.content);
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <Edit className="h-4 w-4" />
-                    Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => onCopy?.(message.content)}
-                    className="flex items-center gap-2"
-                  >
-                    <Copy className="h-4 w-4" />
-                    Copy Text
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
+              {message.content && (
+                <DropdownMenuItem
+                  onClick={() => onCopy?.(message.content ?? '')}
+                  className="flex items-center gap-2"
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy text
+                </DropdownMenuItem>
               )}
+              {isOwn && !isFailed && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setIsEditing(true);
+                    setEditContent(message.content ?? '');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+              )}
+              {isOwn && !isFailed && <DropdownMenuSeparator />}
               <DropdownMenuItem
                 onClick={() => onDelete?.(message.id)}
                 className="flex items-center gap-2 text-red-400 focus:text-red-300"
@@ -190,6 +249,17 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy }: MessagePro
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenuRoot>
+        )}
+        {isFailed && onDiscard && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 p-0 text-text-muted hover:text-accent-warn pointer-coarse:opacity-100 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            onClick={() => onDiscard(message.id)}
+            aria-label="Discard failed message"
+          >
+            <X className="h-4 w-4" />
+          </Button>
         )}
       </div>
     </div>
