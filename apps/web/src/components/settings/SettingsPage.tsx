@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { apiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -18,12 +19,12 @@ import {
 } from '@/components/ui/dialog';
 import { RadioGroupRoot, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from '@/stores/toastStore';
-import { Loader2, User, Shield, LogOut, Trash2, Palette } from 'lucide-react';
+import { Loader2, User, Shield, LogOut, Trash2, Palette, ArrowLeft } from 'lucide-react';
 
 export function SettingsPage() {
   const { user, logout, deleteAccount } = useAuthStore();
+  const navigate = useNavigate();
   const [bio, setBio] = useState(user?.bio ?? '');
-  const [avatarUrl, setAvatarUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [density, setDensity] = useState<'compact' | 'cozy'>(() => {
     if (typeof window !== 'undefined') {
@@ -34,6 +35,11 @@ export function SettingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  // Apply the stored density on load — Message rows read --msg-gap.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--msg-gap', density === 'compact' ? '4px' : '12px');
+  }, [density]);
 
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -72,14 +78,24 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-2xl mx-auto w-full p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
-        <p className="text-text-muted text-sm mt-1">Manage your account, appearance, and preferences</p>
+    <div className="flex flex-col h-full min-h-0 overflow-y-auto max-w-2xl mx-auto w-full p-6">
+      <div className="mb-6 flex items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate({ to: '/app' })}
+          aria-label="Back to app"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
+          <p className="text-text-muted text-sm mt-1">Manage your account, appearance, and preferences</p>
+        </div>
       </div>
 
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="inline-flex h-auto p-1 gap-1 bg-bg-raised rounded-lg max-w-full overflow-x-auto">
           <TabsTrigger value="profile">
             <User className="h-4 w-4 mr-2" />
             Profile
@@ -125,18 +141,6 @@ export function SettingsPage() {
 
           <div className="space-y-4">
             <div>
-              <Label htmlFor="avatarUrl">Avatar URL (optional)</Label>
-              <Input
-                id="avatarUrl"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                placeholder="https://example.com/avatar.png"
-                className="mt-1"
-              />
-              <p className="text-xs text-text-muted mt-1">Leave empty to use your GitHub avatar</p>
-            </div>
-
-            <div>
               <Label htmlFor="bio">Bio</Label>
               <Textarea
                 id="bio"
@@ -174,6 +178,11 @@ export function SettingsPage() {
                 className="mt-1 bg-bg-base text-text-muted"
               />
               <p className="text-xs text-text-muted mt-1">Username is synced from GitHub and cannot be changed</p>
+            </div>
+
+            <div>
+              <Label>Avatar</Label>
+              <p className="text-xs text-text-muted mt-1">Your avatar comes from GitHub and cannot be changed here</p>
             </div>
 
             <div>
@@ -230,7 +239,7 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <div className="h-8 w-8 rounded-full bg-accent-secondary/20 flex items-center justify-center" />
+                  <div className="h-8 w-8 rounded-full bg-accent-electric/20 flex items-center justify-center" />
                   <div className="flex-1">
                     <div className="flex items-baseline gap-2 mb-1">
                       <span className="font-medium text-sm">Another User</span>

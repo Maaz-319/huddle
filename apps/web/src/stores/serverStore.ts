@@ -11,7 +11,21 @@ interface ServerStore {
   fetchServers: () => Promise<void>;
   createServer: (name: string, iconUrl?: string | null) => Promise<ServerResponse>;
   deleteServer: (serverId: string) => Promise<void>;
-  updateServer: (serverId: string, data: { name?: string; iconUrl?: string | null }) => Promise<ServerResponse>;
+  updateServer: (
+    serverId: string,
+    data: {
+      name?: string;
+      iconUrl?: string;
+      channelCreationPolicy?: ServerResponse['channelCreationPolicy'];
+      memberInviteToggle?: boolean;
+    },
+  ) => Promise<ServerResponse>;
+  updateMemberRole: (
+    serverId: string,
+    userId: string,
+    role: 'moderator' | 'member',
+  ) => Promise<void>;
+  transferOwnership: (serverId: string, toUserId: string) => Promise<void>;
   getInvite: (serverId: string) => Promise<InviteResponse>;
   revokeInvite: (serverId: string) => Promise<void>;
   regenerateInvite: (serverId: string) => Promise<InviteResponse>;
@@ -54,6 +68,14 @@ export const useServerStore = create<ServerStore>((set) => ({
       servers: state.servers.map((s) => (s.id === serverId ? server : s)),
     }));
     return server;
+  },
+
+  updateMemberRole: async (serverId, userId, role) => {
+    await apiClient.patch(`/servers/${serverId}/members/${userId}/role`, { role });
+  },
+
+  transferOwnership: async (serverId, toUserId) => {
+    await apiClient.post(`/servers/${serverId}/transfer-ownership`, { toUserId });
   },
 
   getInvite: async (serverId) => {

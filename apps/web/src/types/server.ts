@@ -2,7 +2,7 @@ export interface ServerResponse {
   id: string;
   name: string;
   iconUrl: string | null;
-  channelCreationPolicy: 'owner' | 'moderator' | 'member';
+  channelCreationPolicy: 'owner_only' | 'everyone' | 'mods_only';
   memberInviteToggle: boolean;
   createdAt: string;
 }

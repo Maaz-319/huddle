@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import * as RadixDialog from '@radix-ui/react-dialog';
 import { X, UserPlus, UserMinus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/stores/toastStore';
 import { useChannelStore } from '@/stores/channelStore';
-import { useServerStore } from '@/stores/serverStore';
-import type { ChannelMemberResponse } from '@/types/channel';
+import { authApi } from '@/api/auth';
+import type { ChannelMemberResponse, ServerMemberResponse } from '@/types/channel';
+import type { MeResponse } from '@/types/user';
 
 function getInitials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -20,7 +22,12 @@ function getColorFromString(str: string): string {
   return `hsl(${hue}, 70%, 45%)`;
 }
 
-type ChannelMember = ChannelMemberResponse & {
+type ServerMemberRow = ServerMemberResponse & {
+  username: string;
+  avatarUrl: string | null;
+};
+
+type ChannelMemberRow = ChannelMemberResponse & {
   username: string;
   avatarUrl: string | null;
   role: 'owner' | 'moderator' | 'member';
@@ -34,90 +41,56 @@ interface MemberManagementDrawerProps {
 }
 
 export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId }: MemberManagementDrawerProps) {
-  const { listChannelMembers, addChannelMember, removeChannelMember } = useChannelStore();
-  const { servers } = useServerStore();
-  
-  const [members, setMembers] = useState<ChannelMember[]>([]);
-  const [availableUsers, setAvailableUsers] = useState<ChannelMember[]>([]);
+  const { listChannelMembers, addChannelMember, removeChannelMember, listServerMembers } = useChannelStore();
+
+  const [channelMembers, setChannelMembers] = useState<ChannelMemberRow[]>([]);
+  const [serverMembers, setServerMembers] = useState<ServerMemberRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const loadMembers = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const channelMembers = await listChannelMembers(channelId);
-      const membersWithRoles: ChannelMember[] = channelMembers.map(m => ({
+      const [channelRows, serverRows] = await Promise.all([
+        listChannelMembers(channelId),
+        listServerMembers(serverId),
+      ]);
+      const userIds = [...new Set([...channelRows.map((m) => m.userId), ...serverRows.map((m) => m.userId)])];
+      const users: MeResponse[] = userIds.length > 0 ? await authApi.getUsers(userIds) : [];
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      const roleByUser = new Map(serverRows.map((m) => [m.userId, m.role]));
+
+      setChannelMembers(channelRows.map((m) => ({
         ...m,
-        username: `User ${m.userId.slice(-4)}`,
-        avatarUrl: null,
-        role: 'member' as const,
-      }));
-      setMembers(membersWithRoles);
+        username: userMap.get(m.userId)?.username ?? 'Unknown user',
+        avatarUrl: userMap.get(m.userId)?.avatarUrl ?? null,
+        role: roleByUser.get(m.userId) ?? 'member',
+      })));
+      setServerMembers(serverRows.map((m) => ({
+        ...m,
+        username: userMap.get(m.userId)?.username ?? 'Unknown user',
+        avatarUrl: userMap.get(m.userId)?.avatarUrl ?? null,
+      })));
     } catch (error) {
       toast.error('Failed to load members', error instanceof Error ? error.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, [channelId, listChannelMembers]);
-
-  const loadAvailableUsers = useCallback(async () => {
-    const server = servers.find(s => s.id === serverId);
-    if (!server) return;
-    
-    setAvailableUsers([
-      { 
-        channelId, 
-        userId: 'user-1', 
-        addedAt: '', 
-        username: 'Alice', 
-        avatarUrl: null, 
-        role: 'owner' as const
-      },
-      { 
-        channelId, 
-        userId: 'user-2', 
-        addedAt: '', 
-        username: 'Bob', 
-        avatarUrl: null, 
-        role: 'moderator' as const
-      },
-      { 
-        channelId, 
-        userId: 'user-3', 
-        addedAt: '', 
-        username: 'Charlie', 
-        avatarUrl: null, 
-        role: 'member' as const
-      },
-      { 
-        channelId, 
-        userId: 'user-4', 
-        addedAt: '', 
-        username: 'Diana', 
-        avatarUrl: null, 
-        role: 'member' as const
-      },
-      { 
-        channelId, 
-        userId: 'user-5', 
-        addedAt: '', 
-        username: 'Eve', 
-        avatarUrl: null, 
-        role: 'member' as const
-      },
-    ].filter(u => !members.some(m => m.userId === u.userId)));
-  }, [serverId, servers, members, channelId]);
+  }, [channelId, serverId, listChannelMembers, listServerMembers]);
 
   useEffect(() => {
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadMembers();
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadAvailableUsers();
+      loadAll();
     }
-  }, [open, channelId, serverId, loadMembers, loadAvailableUsers]);
+  }, [open, loadAll]);
+
+  const availableUsers = useMemo(
+    () => serverMembers.filter((u) => !channelMembers.some((m) => m.userId === u.userId)),
+    [serverMembers, channelMembers],
+  );
 
   const filteredAvailableUsers = availableUsers.filter(u =>
     u.username.toLowerCase().includes(searchQuery.toLowerCase())
@@ -128,8 +101,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
     try {
       await addChannelMember(channelId, userId);
       toast.success('Member added');
-      loadMembers();
-      loadAvailableUsers();
+      loadAll();
     } catch (error) {
       toast.error('Failed to add member', error instanceof Error ? error.message : 'Unknown error');
     } finally {
@@ -144,8 +116,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
     try {
       await removeChannelMember(channelId, userId);
       toast.success('Member removed');
-      loadMembers();
-      loadAvailableUsers();
+      loadAll();
     } catch (error) {
       toast.error('Failed to remove member', error instanceof Error ? error.message : 'Unknown error');
     } finally {
@@ -153,33 +124,37 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
     }
   };
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 lg:hidden" onClick={() => onOpenChange(false)} aria-hidden="true">
-      <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-bg-raised shadow-xl animate-in slide-in-from-right" onClick={e => e.stopPropagation()}>
-        <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
-          <h2 className="text-text-primary font-semibold">Manage Members</h2>
-          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-4">
+    <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
+      <RadixDialog.Portal>
+        <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <RadixDialog.Content className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md bg-bg-raised border-l border-border-subtle shadow-xl flex flex-col outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right">
+          <div className="flex h-16 shrink-0 items-center justify-between px-4 border-b border-border-subtle">
+            <RadixDialog.Title className="text-text-primary font-semibold truncate">
+              Manage Members
+            </RadixDialog.Title>
+            <RadixDialog.Close asChild>
+              <Button variant="ghost" size="icon" aria-label="Close">
+                <X className="h-5 w-5" />
+              </Button>
+            </RadixDialog.Close>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
           {/* Current Members */}
           <div className="mb-6">
             <h3 className="text-text-muted text-xs font-semibold uppercase tracking-wider mb-3">
-              Current Members ({members.length})
+              Current Members ({channelMembers.length})
             </h3>
             {loading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
               </div>
-            ) : members.length === 0 ? (
+            ) : channelMembers.length === 0 ? (
               <p className="text-text-muted text-sm text-center py-4">No members yet</p>
             ) : (
               <div className="space-y-2">
-                {members.map(member => (
+                {channelMembers.map(member => (
                   <div key={member.userId} className="flex items-center gap-3 px-3 py-2 hover:bg-bg-overlay rounded-lg">
                     <div className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
                       style={{ backgroundColor: getColorFromString(member.username) }}>
@@ -257,8 +232,9 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </div>
+          </div>
+        </RadixDialog.Content>
+      </RadixDialog.Portal>
+    </RadixDialog.Root>
   );
 }
