@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { authApi } from '@/api/auth'
 import { router } from '@/router'
+import { consumeReturnTo } from '@/utils/returnTo'
 
 export function AuthCallback() {
   const { setUser } = useAuthStore()
@@ -11,7 +12,7 @@ export function AuthCallback() {
       try {
         const response = await authApi.getMe()
         setUser(response)
-        router.navigate({ to: '/app' })
+        router.navigate({ to: consumeReturnTo('/app') })
       } catch {
         setUser(null)
         router.navigate({ to: '/' })

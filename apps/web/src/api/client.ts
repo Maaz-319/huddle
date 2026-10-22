@@ -1,8 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
-interface ApiError extends Error {
+export interface ApiError extends Error {
   status: number;
   data?: unknown;
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof Error && 'status' in error;
 }
 
 function createApiError(message: string, status: number, data?: unknown): ApiError {
