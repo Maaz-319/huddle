@@ -21,6 +21,11 @@ export interface MessageResponse {
   // Client-side only fields for optimistic updates
   pending?: boolean;
   failed?: boolean;
+  uncertain?: boolean;
+  /** Local deadline after which a retry requires an explicit resend warning. */
+  retryExpiresAt?: number;
+  /** Present only on the originating socket's message_create event. */
+  idempotencyKey?: string;
 }
 
 export interface MessageDeleteResponse {

@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useMessages } from './useMessages';
-import { useMessageStore } from '@/stores/messageStore';
+import { useChannelTranscript } from '@/transcript/channelTranscript';
+import { useMessageStore } from './messageStore';
 import { useAuthStore } from '@/stores/authStore';
 
 const { emitMock, apiGetMock, apiPostMock, apiPatchMock, apiDeleteMock } = vi.hoisted(() => ({
@@ -20,6 +20,14 @@ vi.mock('@/hooks/useSocket', () => ({
     isConnected: false,
     status: 'disconnected',
   }),
+  useSocketStatus: () => 'disconnected',
+}));
+
+vi.mock('@/api/socket', () => ({
+  getSocketStatus: () => 'disconnected',
+  emitWithAck: emitMock,
+  onServerEvent: () => () => {},
+  SocketAckError: class SocketAckError extends Error {},
 }));
 
 vi.mock('@/api/client', () => ({
@@ -57,7 +65,7 @@ function serverMessage(content: string) {
   };
 }
 
-describe('useMessages REST fallback while the socket is down', () => {
+describe('channel transcript REST fallback while the socket is down', () => {
   beforeEach(() => {
     emitMock.mockClear();
     apiGetMock.mockClear().mockResolvedValue({ messages: [], hasMore: false });
@@ -72,7 +80,7 @@ describe('useMessages REST fallback while the socket is down', () => {
     const created = serverMessage('hello');
     apiPostMock.mockResolvedValue(created);
 
-    const { result } = renderHook(() => useMessages(CHANNEL_ID));
+    const { result } = renderHook(() => useChannelTranscript(CHANNEL_ID));
     await act(async () => {
       await result.current.sendMessage('hello');
     });
@@ -91,7 +99,7 @@ describe('useMessages REST fallback while the socket is down', () => {
   it('flags the row failed when the REST send rejects', async () => {
     apiPostMock.mockRejectedValue(new Error('network down'));
 
-    const { result } = renderHook(() => useMessages(CHANNEL_ID));
+    const { result } = renderHook(() => useChannelTranscript(CHANNEL_ID));
     await act(async () => {
       await expect(result.current.sendMessage('hi')).rejects.toThrow('network down');
     });
@@ -110,7 +118,7 @@ describe('useMessages REST fallback while the socket is down', () => {
       editedAt: '2026-01-02T00:00:00.000Z',
     });
 
-    const { result } = renderHook(() => useMessages(CHANNEL_ID));
+    const { result } = renderHook(() => useChannelTranscript(CHANNEL_ID));
     await act(async () => {
       useMessageStore.getState().addMessages(CHANNEL_ID, [existing]);
     });
@@ -133,7 +141,7 @@ describe('useMessages REST fallback while the socket is down', () => {
     const existing = serverMessage('bye');
     apiDeleteMock.mockResolvedValue(undefined);
 
-    const { result } = renderHook(() => useMessages(CHANNEL_ID));
+    const { result } = renderHook(() => useChannelTranscript(CHANNEL_ID));
     await act(async () => {
       useMessageStore.getState().addMessages(CHANNEL_ID, [existing]);
     });
@@ -148,7 +156,7 @@ describe('useMessages REST fallback while the socket is down', () => {
 
     const rows = useMessageStore.getState().getMessages(CHANNEL_ID);
     expect(rows[0]?.isDeleted).toBe(true);
-    expect(rows[0]?.content).toBe('message deleted');
+    expect(rows[0]?.content).toBe(null);
     expect(rows[0]?.pending).toBe(false);
   });
 });

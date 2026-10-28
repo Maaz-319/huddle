@@ -2,13 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
-import { useMessageStore } from '@/stores/messageStore';
 import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { toast } from '@/stores/toastStore';
 import { apiClient, isApiError } from '@/api/client';
-import { applyCatchUpReply } from '@/hooks/useMessages';
+import { forgetChannel, useTranscriptRuntime } from '@/transcript/channelTranscript';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
 import { MemberSidebar } from './MemberSidebar';
@@ -47,7 +46,8 @@ function NoServersWelcome({ onCreateServer }: { onCreateServer: () => void }) {
 
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
-  const { socket, status, connect, emit, on, isConnected } = useSocket();
+  const { socket, status, connect, on } = useSocket();
+  useTranscriptRuntime();
   const {
     currentServerId,
     servers,
@@ -124,6 +124,10 @@ export function AppShell() {
       channelStore.onChannelAdded(channelId);
     });
     const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
+      forgetChannel(channelId);
+      if (params.channelId === channelId && params.serverId) {
+        navigate({ to: `/app/${params.serverId}` });
+      }
       const emptiedServerId = (() => {
         for (const [sid, channels] of useChannelStore.getState().channelsByServer.entries()) {
           if (channels.some((c) => c.id === channelId)) {
@@ -168,29 +172,7 @@ export function AppShell() {
       cleanupChannelAdded();
       cleanupChannelRemoved();
     };
-  }, [socket, on, navigate]);
-
-  // Catch up on reconnect: every channel the client holds state for, in one
-  // frame (not one per channel — that's the reconnection storm the frame
-  // exists to avoid). The reply lives only in the ack, so it has to be
-  // awaited and applied; a fire-and-forget emit fetched nothing.
-  useEffect(() => {
-    if (!isConnected) return;
-
-    const channels = Array.from(useMessageStore.getState().lastMessageIds.entries()).map(
-      ([channelId, afterMessageId]) => ({ channelId, afterMessageId })
-    );
-    if (channels.length === 0) return;
-
-    void (async () => {
-      try {
-        const reply = await emit('catch_up', { channels });
-        await applyCatchUpReply(reply);
-      } catch (error) {
-        console.error('Catch-up failed:', error);
-      }
-    })();
-  }, [isConnected, emit]);
+  }, [socket, on, navigate, params.channelId, params.serverId]);
 
   // Redirect to first server if on /app with no server selected
   useEffect(() => {

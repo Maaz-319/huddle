@@ -8,6 +8,16 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 let socketInstance: Socket | null = null;
 
+export class SocketAckError extends Error {
+  readonly retryable: boolean;
+
+  constructor(code: string, retryable: boolean) {
+    super(code);
+    this.name = 'SocketAckError';
+    this.retryable = retryable;
+  }
+}
+
 function createSocket(): Socket {
   const socket = io(API_URL, {
     auth: {},
@@ -190,13 +200,11 @@ export function emitWithAck<K extends ClientEventType>(
   }
 
   return new Promise<AckResponseMap[K]>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Ack timeout for ${event}`));
-    }, timeoutMs);
-
     const ackKey = crypto.randomUUID();
-
     const { addPendingAck, resolvePendingAck, rejectPendingAck } = useSocketStore.getState();
+    const timeout = setTimeout(() => {
+      rejectPendingAck(ackKey, new Error(`Ack timeout for ${event}`));
+    }, timeoutMs);
     addPendingAck(ackKey, { 
       resolve: resolve as (value: unknown) => void, 
       reject, 
@@ -206,7 +214,7 @@ export function emitWithAck<K extends ClientEventType>(
     // Emit with ack callback
     socket.emit(event, payload, (response: AckResponseMap[K]) => {
       if ('error' in response && response.error) {
-        rejectPendingAck(ackKey, new Error(response.error.code));
+        rejectPendingAck(ackKey, new SocketAckError(response.error.code, response.error.retryable));
       } else {
         resolvePendingAck(ackKey, response);
       }
