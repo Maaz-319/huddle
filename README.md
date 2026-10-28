@@ -133,6 +133,103 @@ data volume is empty — so editing it later requires a `db:reset` to take effec
 
 > `db:reset` drops volumes. Only ever run it against local Docker.
 
+## Trying it on another device
+
+Two origins have to be reachable from the other device: the API (default
+`:3000`) and the Vite dev server (`:5173`). The browser learns the API's address
+from `VITE_API_URL` in `apps/web/.env` when the dev server starts, and the API
+decides who may call it and where to send the browser after GitHub login from
+`WEB_ORIGIN` and `GITHUB_CALLBACK_URL` in `apps/api/.env`.
+
+**Cloudflare quick tunnels do not work for this app.** Two random
+`*.trycloudflare.com` hostnames are two different sites — `trycloudflare.com`
+is on the Public Suffix List — and the session cookie is `SameSite=Lax`, so the
+browser drops it on every cross-site API call and login loops. One quick tunnel
+in front of the Vite dev server is no better: Vite only proxies `/auth`, `/api`,
+and `/socket.io`, so `/servers`, `/channels`, `/invites`, and
+`/presence/snapshot` never reach the API.
+
+What works is a **named tunnel with one hostname per app under a domain you
+own**: same registrable domain means same site, so the cookie flows, and the
+hostnames are stable, so the GitHub callback URL is registered once.
+
+### 1. Start the app
+
+```bash
+npm run db:up                # Postgres + Redis in Docker, once
+npm run dev                  # API on :3000 — terminal 1
+npm run dev -w @huddle/web   # Vite on :5173 — terminal 2
+```
+
+### 2. Create the tunnel
+
+With a domain in a Cloudflare account, and `cloudflared tunnel login` done
+once:
+
+```bash
+cloudflared tunnel create huddle
+cloudflared tunnel route dns huddle huddle.example.com
+cloudflared tunnel route dns huddle api.huddle.example.com
+```
+
+`~/.cloudflared/config.yml` (the credentials file path is printed by `create`):
+
+```yaml
+tunnel: <TUNNEL_ID>
+credentials-file: /home/<you>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: huddle.example.com
+    service: http://localhost:5173
+  - hostname: api.huddle.example.com
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+```bash
+cloudflared tunnel run huddle
+```
+
+Websockets (socket.io) work through the tunnel without extra configuration.
+
+### 3. Point the app at the tunnel
+
+Both servers read their environment at boot — restart them after editing.
+
+`apps/web/.env`:
+
+```
+VITE_API_URL=https://api.huddle.example.com
+```
+
+`VITE_WS_URL` is vestigial; the socket.io client connects through
+`VITE_API_URL`.
+
+`apps/api/.env`:
+
+```
+WEB_ORIGIN=https://huddle.example.com
+GITHUB_CALLBACK_URL=https://api.huddle.example.com/auth/github/callback
+TRUSTED_PROXY_HOPS=1
+```
+
+`TRUSTED_PROXY_HOPS=1` because cloudflared is now the one proxy in front: it is
+what lets the rate limiter see each device's real address in `X-Forwarded-For`
+instead of bucketing every device under `127.0.0.1`.
+
+### 4. Register the callback on GitHub
+
+GitHub → Settings → Developer settings → OAuth Apps → your app → set the
+**Authorization callback URL** to
+`https://api.huddle.example.com/auth/github/callback`. An OAuth App holds
+exactly one callback URL; to keep plain-localhost logins working as well,
+either edit the field when you switch, or give the tunnel its own OAuth App
+and put that client id/secret in `apps/api/.env`.
+
+Open `https://huddle.example.com` on any device and sign in. Sessions live in
+the local Redis, which has persistence off on purpose — a `db:down` or reboot
+signs every device out again.
+
 ## Continuous integration
 
 Every pull request, and every push to `main`, runs
