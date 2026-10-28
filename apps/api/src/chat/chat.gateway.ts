@@ -448,17 +448,29 @@ export class ChatGateway implements OnGatewayConnection {
    * sender's UI updates from the direct ack, but its own broadcast is not
    * suppressed).
    *
-   * Called from two places — this gateway's own handler after a socket send,
-   * and the REST `POST` after the service write — because `ChatService` must
-   * not know that rooms exist and the controller must not either: two write
-   * paths were the whole point of routing both through `postMessage`, and a
-   * second emit path would undo it.
+   * Called from the gateway after a socket send and from the REST `POST`.
+   * The originating socket receives its nonce for exact optimistic-row
+   * reconciliation; every other viewer receives the ordinary message shape.
+   * REST has no nonce, so it broadcasts the ordinary shape to the room.
    *
    * The payload is already shaped (`MessageResponse`): REST passes the very
    * object it is returning, so the Snowflake decoding happens once per
    * message, not twice.
    */
-  broadcastCreate(channelId: bigint, message: MessageResponse): void {
+  broadcastCreate(
+    channelId: bigint,
+    message: MessageResponse,
+    sender?: AuthenticatedSocket,
+    idempotencyKey?: string,
+  ): void {
+    if (sender && idempotencyKey) {
+      sender.to(channelId.toString()).emit('message_create', message);
+      this.reachSocket(sender.id).emit('message_create', {
+        ...message,
+        idempotencyKey,
+      });
+      return;
+    }
     this.server.to(channelId.toString()).emit('message_create', message);
   }
 
@@ -559,7 +571,7 @@ export class ChatGateway implements OnGatewayConnection {
         messageId: response.id,
         createdAt: response.createdAt,
       });
-      this.broadcastCreate(frame.channelId, response);
+      this.broadcastCreate(frame.channelId, response, socket, frame.idempotencyKey);
     } catch (error) {
       // A domain refusal is an answered question, not a fault; anything else
       // is a bug and belongs in the log with its stack.

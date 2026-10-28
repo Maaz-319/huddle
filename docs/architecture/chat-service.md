@@ -59,6 +59,8 @@ Out of scope (this doc): permission *rules* (who can post/view/delete — owned 
 - The same idempotency key is used to **dedupe retries**: if the server sees a repeated key within the retention window, it returns the original result instead of creating a duplicate message. Client-side auto-retry (for some error classes) relies on this.
 - **Idempotency key retention window: 30 seconds.**
 - The normal `message_create` broadcast still fires to all channel viewers (including the sender, if subscribed) — the sender's UI updates from the direct ack, not by waiting for its own broadcast to loop back.
+- For a WebSocket send, the originating socket's `message_create` also echoes its `idempotencyKey`. Other viewers, including the sender's other sockets, receive the ordinary message shape. The client can therefore reconcile an optimistic row even if the broadcast reaches it before the ack; message text and author are never used as identity. REST sends and history responses do not expose a key.
+- If a send's result is uncertain, the client may replay its original key within the 30-second retention window. Once that window is over, it requires an explicit resend warning because the ephemeral Redis key cannot prove whether the original write succeeded.
 
 ---
 
