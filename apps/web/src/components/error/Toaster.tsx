@@ -44,17 +44,17 @@ function Toast({ toast: toastItem, onClose }: ToastProps) {
   }, [onClose, toastItem.duration]);
 
   const typeStyles = {
-    success: 'border-l-4 border-green-500 bg-green-950/50',
-    error: 'border-l-4 border-red-500 bg-red-950/50',
-    warning: 'border-l-4 border-yellow-500 bg-yellow-950/50',
-    info: 'border-l-4 border-blue-500 bg-blue-950/50',
+    success: 'border-l-4 border-accent-primary bg-bg-overlay',
+    error: 'border-l-4 border-accent-warn bg-bg-overlay',
+    warning: 'border-l-4 border-accent-warn bg-bg-overlay',
+    info: 'border-l-4 border-accent-info bg-bg-overlay',
   };
 
   const iconStyles = {
-    success: 'text-green-400',
-    error: 'text-red-400',
-    warning: 'text-yellow-400',
-    info: 'text-blue-400',
+    success: 'text-accent-primary',
+    error: 'text-accent-warn',
+    warning: 'text-accent-warn',
+    info: 'text-accent-info',
   };
 
   return (
@@ -107,16 +107,15 @@ function Toast({ toast: toastItem, onClose }: ToastProps) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-white">{toastItem.title}</p>
+        <p className="text-sm font-medium text-text-primary">{toastItem.title}</p>
         {toastItem.description && (
-          <p className="text-sm text-gray-300 mt-1">{toastItem.description}</p>
+        <p className="mt-1 text-sm text-text-secondary">{toastItem.description}</p>
         )}
       </div>
       <button
         onClick={onClose}
         className={cn(
-          'flex-shrink-0 p-1 rounded hover:bg-white/10 transition-colors',
-          'text-gray-400 hover:text-white'
+          'flex-shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-bg-raised hover:text-text-primary',
         )}
         aria-label="Dismiss"
       >

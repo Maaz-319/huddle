@@ -88,7 +88,7 @@ export function MessagePane() {
   if (!currentChannelId) {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
+        <div className="hidden h-16 items-center justify-between border-b border-border-subtle px-4 lg:flex">
           <h1 className="text-text-primary font-semibold">Messages</h1>
         </div>
         <EmptyMessages hasChannels={(channelsByServer.get(params.serverId ?? '') ?? []).length > 0} />
@@ -110,7 +110,7 @@ export function MessagePane() {
       )}
 
       {/* Channel header */}
-      <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
+      <div className="hidden h-16 items-center justify-between border-b border-border-subtle px-4 lg:flex">
         <div className="flex items-center gap-3 min-w-0">
           <div className="h-10 w-10 rounded-lg bg-accent-primary/20 flex items-center justify-center flex-shrink-0">
             <Hash className="h-5 w-5 text-accent-primary" aria-hidden="true" />

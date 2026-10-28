@@ -13,7 +13,7 @@ export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeo
 }
 
 export function DialogContent({ className, variant = 'modal', children, ...props }: DialogContentProps) {
-  const baseStyles = 'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 bg-bg-overlay border border-border-subtle rounded-lg shadow-lg max-w-lg w-full p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto'
+  const baseStyles = 'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl border border-border-subtle bg-bg-overlay p-5 text-text-primary shadow-lg sm:p-6'
   const variantStyles = {
     modal: 'max-w-md',
     alert: 'max-w-sm',
@@ -36,7 +36,7 @@ export function DialogContent({ className, variant = 'modal', children, ...props
         {...props}
       >
         {children}
-        <Dialog.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-bg-base transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-bg-raised data-[state=open]:text-text-primary">
+        <Dialog.Close className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-raised hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-overlay disabled:pointer-events-none sm:right-4 sm:top-4">
           <X className="h-4 w-4" aria-hidden="true" />
           <span className="sr-only">Close</span>
         </Dialog.Close>

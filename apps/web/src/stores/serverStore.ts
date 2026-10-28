@@ -7,6 +7,7 @@ interface ServerStore {
   servers: ServerResponse[];
   currentServerId: string | null;
   loading: boolean;
+  hasFetched: boolean;
   error: string | null;
   myRolesByServer: Record<string, ServerRole>;
   
@@ -40,22 +41,27 @@ export const useServerStore = create<ServerStore>((set) => ({
   servers: [],
   currentServerId: null,
   loading: false,
+  hasFetched: false,
   error: null,
   myRolesByServer: {},
   
   fetchServers: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true, hasFetched: false, error: null });
     try {
       const servers = await apiClient.get<ServerResponse[]>('/servers');
-      set({ servers, loading: false });
+      set({ servers, loading: false, hasFetched: true });
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : 'Failed to fetch servers', loading: false });
+      set({
+        error: error instanceof Error ? error.message : 'Failed to fetch servers',
+        loading: false,
+        hasFetched: true,
+      });
     }
   },
 
   createServer: async (name, iconUrl) => {
     const server = await apiClient.post<ServerResponse>('/servers', { name, iconUrl });
-    set((state) => ({ servers: [...state.servers, server] }));
+    set((state) => ({ servers: [...state.servers, server], hasFetched: true }));
     return server;
   },
 

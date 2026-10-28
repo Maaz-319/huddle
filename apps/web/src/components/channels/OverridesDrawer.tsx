@@ -192,9 +192,9 @@ export function OverridesDrawer({ open, onOpenChange, channelId }: OverridesDraw
                       <div className="min-w-0">
                         <span className={cn(
                           'inline-block max-w-full truncate px-2 py-1 rounded text-xs font-medium',
-                          role === 'owner' && 'bg-purple-500/20 text-purple-400',
-                          role === 'moderator' && 'bg-blue-500/20 text-blue-400',
-                          role === 'member' && 'bg-gray-500/20 text-gray-400'
+                          role === 'owner' && 'bg-accent-owner/10 text-accent-owner',
+                          role === 'moderator' && 'bg-accent-info/10 text-accent-info',
+                          role === 'member' && 'bg-bg-raised text-text-muted'
                         )}>
                           {ROLE_LABELS[role]}
                         </span>

@@ -46,7 +46,7 @@ export function MemberProfileCard({
             <span
               className={cn(
                 'h-2 w-2 rounded-full flex-shrink-0',
-                isOnline ? 'bg-green-500' : 'bg-gray-500',
+                isOnline ? 'bg-accent-primary' : 'bg-accent-offline',
               )}
             />
             <span className="text-xs text-text-muted">{isOnline ? 'Online' : 'Offline'}</span>

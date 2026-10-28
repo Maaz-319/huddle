@@ -4,7 +4,11 @@ import { RouterProvider } from '@tanstack/react-router'
 import { router } from './router'
 import { useAuthStore } from './stores/authStore'
 import { TooltipProvider } from './components/ui'
+import { initializeTheme } from './utils/theme'
 import './index.css'
+
+// Apply the saved/system theme before React mounts.
+initializeTheme()
 
 // Initialize auth store hydration on app start
 useAuthStore.getState().hydrate()

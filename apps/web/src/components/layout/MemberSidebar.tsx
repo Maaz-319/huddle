@@ -28,13 +28,13 @@ function getRoleBadge(role: Member['role']) {
   switch (role) {
     case 'owner':
       return (
-        <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-500/20 text-purple-400 rounded-full">
+        <span className="rounded-full bg-accent-owner/10 px-1.5 py-0.5 text-xs font-medium text-accent-owner">
           Owner
         </span>
       );
     case 'moderator':
       return (
-        <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-500/20 text-blue-400 rounded-full">
+        <span className="rounded-full bg-accent-info/10 px-1.5 py-0.5 text-xs font-medium text-accent-info">
           Mod
         </span>
       );
@@ -68,8 +68,8 @@ function MemberItem({ member, isOnline }: { member: Member; isOnline: boolean })
             )}
             <span
               className={cn(
-                'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base',
-                isOnline ? 'bg-green-500' : 'bg-gray-500'
+                'absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-bg-base',
+                isOnline ? 'bg-accent-primary' : 'bg-accent-offline'
               )}
             />
           </div>

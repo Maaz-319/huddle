@@ -7,6 +7,7 @@ interface UIState {
   isChannelListOpen: boolean;
   isMemberSidebarOpen: boolean;
   isServerListOpen: boolean;
+  isCreateServerDialogOpen: boolean;
 
   // Mobile navigation
   activeMobileTab: 'servers' | 'channels' | 'messages' | 'members';
@@ -18,6 +19,7 @@ interface UIState {
   setChannelListOpen: (open: boolean) => void;
   setMemberSidebarOpen: (open: boolean) => void;
   setServerListOpen: (open: boolean) => void;
+  setCreateServerDialogOpen: (open: boolean) => void;
   setActiveMobileTab: (tab: 'servers' | 'channels' | 'messages' | 'members') => void;
   closeAllDrawers: () => void;
 }
@@ -26,7 +28,8 @@ export const useUIStore = create<UIState>((set) => ({
   isChannelListOpen: true,
   isMemberSidebarOpen: false,
   isServerListOpen: false,
-  activeMobileTab: 'channels',
+  isCreateServerDialogOpen: false,
+  activeMobileTab: 'messages',
 
   toggleChannelList: () => set((state) => ({ isChannelListOpen: !state.isChannelListOpen })),
   toggleMemberSidebar: () => set((state) => ({ isMemberSidebarOpen: !state.isMemberSidebarOpen })),
@@ -34,6 +37,7 @@ export const useUIStore = create<UIState>((set) => ({
   setChannelListOpen: (open) => set({ isChannelListOpen: open }),
   setMemberSidebarOpen: (open) => set({ isMemberSidebarOpen: open }),
   setServerListOpen: (open) => set({ isServerListOpen: open }),
+  setCreateServerDialogOpen: (open) => set({ isCreateServerDialogOpen: open }),
   setActiveMobileTab: (tab) => set({ activeMobileTab: tab }),
   closeAllDrawers: () =>
     set({
