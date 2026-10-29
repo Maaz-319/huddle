@@ -11,26 +11,30 @@ import { authApi } from '@/api/auth';
 import { apiClient } from '@/api/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { PopoverRoot, PopoverTrigger } from '@/components/ui/popover';
+import { MemberProfileCard } from './MemberProfileCard';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface Member {
   id: string;
   username: string;
   avatarUrl: string | null;
+  bio: string | null;
   role: 'owner' | 'moderator' | 'member';
+  joinedAt: string;
 }
 
 function getRoleBadge(role: Member['role']) {
   switch (role) {
     case 'owner':
       return (
-        <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-500/20 text-purple-400 rounded-full">
+        <span className="rounded-full bg-accent-owner/10 px-1.5 py-0.5 text-xs font-medium text-accent-owner">
           Owner
         </span>
       );
     case 'moderator':
       return (
-        <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-500/20 text-blue-400 rounded-full">
+        <span className="rounded-full bg-accent-info/10 px-1.5 py-0.5 text-xs font-medium text-accent-info">
           Mod
         </span>
       );
@@ -41,34 +45,49 @@ function getRoleBadge(role: Member['role']) {
 
 function MemberItem({ member, isOnline }: { member: Member; isOnline: boolean }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg">
-      <div className="relative">
-        {member.avatarUrl ? (
-          <img
-            src={member.avatarUrl}
-            alt=""
-            className="h-8 w-8 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
-            style={{ backgroundColor: getColorFromString(member.username) }}
-          >
-            {getInitials(member.username)}
+    <PopoverRoot>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 px-3 py-2 hover:bg-bg-raised rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-accent-electric/40"
+        >
+          <div className="relative">
+            {member.avatarUrl ? (
+              <img
+                src={member.avatarUrl}
+                alt=""
+                className="h-8 w-8 rounded-full object-cover"
+              />
+            ) : (
+              <div
+                className="h-8 w-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
+                style={{ backgroundColor: getColorFromString(member.username) }}
+              >
+                {getInitials(member.username)}
+              </div>
+            )}
+            <span
+              className={cn(
+                'absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-bg-base',
+                isOnline ? 'bg-accent-primary' : 'bg-accent-offline'
+              )}
+            />
           </div>
-        )}
-        <span
-          className={cn(
-            'absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-base',
-            isOnline ? 'bg-green-500' : 'bg-gray-500'
-          )}
-        />
-      </div>
-      <div className="flex-1 min-w-0 flex items-center gap-2">
-        <span className="truncate font-medium text-sm text-text-primary">{member.username}</span>
-        {getRoleBadge(member.role)}
-      </div>
-    </div>
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <span className="truncate font-medium text-sm text-text-primary">{member.username}</span>
+            {getRoleBadge(member.role)}
+          </div>
+        </button>
+      </PopoverTrigger>
+      <MemberProfileCard
+        username={member.username}
+        avatarUrl={member.avatarUrl}
+        roleBadge={getRoleBadge(member.role)}
+        bio={member.bio}
+        joinedAt={member.joinedAt}
+        isOnline={isOnline}
+      />
+    </PopoverRoot>
   );
 }
 
@@ -138,7 +157,9 @@ export function MemberSidebar() {
             id: m.userId,
             username: user?.username ?? 'Unknown User',
             avatarUrl: user?.avatarUrl ?? null,
+            bio: user?.bio ?? null,
             role: m.role,
+            joinedAt: m.joinedAt,
           };
         });
 

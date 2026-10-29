@@ -1,6 +1,5 @@
 import { createRouter, createRootRoute, createRoute, Outlet } from '@tanstack/react-router'
 import { LandingPage } from '@/components/auth/LandingPage'
-import { AuthCallback } from '@/components/auth/AuthCallback'
 import { ProtectedApp } from '@/components/layout/ProtectedApp'
 import { AppShell } from '@/components/layout/AppShell'
 import { SettingsShell } from '@/components/layout/SettingsShell'
@@ -20,13 +19,6 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: () => <LandingPage />,
-})
-
-// Auth callback - /auth/callback
-const authCallbackRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/auth/callback',
-  component: () => <AuthCallback />,
 })
 
 // Invite preview - /invite/:code (public)
@@ -104,7 +96,6 @@ const appIndexRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
-  authCallbackRoute,
   invitePreviewRoute,
   appRoute.addChildren([
     appShellRoute.addChildren([

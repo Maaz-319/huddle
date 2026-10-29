@@ -16,6 +16,7 @@ import { getInitials, getColorFromString } from '@/utils/avatar';
 interface MessageProps {
   message: MessageResponse;
   isOwn: boolean;
+  canDeleteOthers?: boolean;
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
@@ -23,7 +24,7 @@ interface MessageProps {
   onDiscard?: (messageId: string) => void;
 }
 
-export function Message({ message, isOwn, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
+export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content ?? '');
   const [editFailed, setEditFailed] = useState(false);
@@ -240,13 +241,15 @@ export function Message({ message, isOwn, onEdit, onDelete, onCopy, onRetry, onD
                 </DropdownMenuItem>
               )}
               {isOwn && !isFailed && <DropdownMenuSeparator />}
-              <DropdownMenuItem
-                onClick={() => onDelete?.(message.id)}
-                className="flex items-center gap-2 text-red-400 focus:text-red-300"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
+              {(isOwn || canDeleteOthers) && (
+                <DropdownMenuItem
+                  onClick={() => onDelete?.(message.id)}
+                  className="flex items-center gap-2 text-red-400 focus:text-red-300"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenuRoot>
         )}

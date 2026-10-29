@@ -17,6 +17,23 @@ function createApiError(message: string, status: number, data?: unknown): ApiErr
   return error;
 }
 
+function extractErrorMessage(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  if ('message' in body && typeof body.message === 'string') {
+    return body.message;
+  }
+  if (
+    'error' in body &&
+    typeof body.error === 'object' &&
+    body.error !== null &&
+    'message' in body.error &&
+    typeof body.error.message === 'string'
+  ) {
+    return body.error.message;
+  }
+  return undefined;
+}
+
 async function fetchWithAuth<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -31,13 +48,23 @@ async function fetchWithAuth<T>(path: string, options: RequestInit = {}): Promis
     if (response.status === 401) {
       throw createApiError('Unauthorized', 401);
     }
-    const error = await response.json().catch(() => ({ message: 'Request failed' }));
+    const body = await response.json().catch(() => undefined);
+
+    if (response.status === 429) {
+      const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10);
+      throw createApiError(
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? `Too many requests — try again in ${retryAfter}s`
+          : 'Too many requests',
+        429,
+        body,
+      );
+    }
+
     throw createApiError(
-      typeof error === 'object' && error !== null && 'message' in error 
-        ? String(error.message) 
-        : `HTTP ${response.status}`,
+      extractErrorMessage(body) ?? `HTTP ${response.status}`,
       response.status,
-      error
+      body,
     );
   }
 

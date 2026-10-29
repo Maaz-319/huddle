@@ -49,6 +49,15 @@ describe('TypingFrameDto', () => {
       ).rejects.toBeInstanceOf(ValidationError);
     });
 
+    it('rejects an extra `typing` flag — the frame is channelId-only', async () => {
+      await expect(
+        parseTypingFrame(validFrame({ typing: true })),
+      ).rejects.toBeInstanceOf(ValidationError);
+      await expect(
+        parseTypingFrame(validFrame({ typing: false })),
+      ).rejects.toBeInstanceOf(ValidationError);
+    });
+
     it('rejects a payload that is not an object at all', async () => {
       await expect(parseTypingFrame('typing')).rejects.toBeInstanceOf(
         ValidationError,

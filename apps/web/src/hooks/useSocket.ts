@@ -4,6 +4,21 @@ import { connectSocket, disconnectSocket, emitWithAck, onServerEvent } from '@/a
 import type { SocketStatus, ClientEventMap, ClientEventType, ServerEventMap, ServerEventType, AckResponseMap } from '@/types/socket';
 import { crypto } from '@/utils/crypto';
 
+const IDEMPOTENT_CLIENT_EVENTS: ReadonlySet<string> = new Set([
+  'message_send',
+  'message_edit',
+  'message_delete',
+]);
+
+function toWirePayload<K extends ClientEventType>(
+  event: K,
+  payload: Omit<ClientEventMap[K], 'idempotencyKey'>,
+): ClientEventMap[K] {
+  return (IDEMPOTENT_CLIENT_EVENTS.has(event)
+    ? { ...payload, idempotencyKey: crypto.randomUUID() }
+    : payload) as ClientEventMap[K];
+}
+
 export function useSocket() {
   const { socket, status } = useSocketStore();
   const initializedRef = useRef(false);
@@ -29,11 +44,19 @@ export function useSocket() {
       payload: Omit<ClientEventMap[K], 'idempotencyKey'>,
       timeoutMs?: number
     ): Promise<AckResponseMap[K]> => {
-      const idempotencyKey = crypto.randomUUID();
-      const payloadWithKey = { ...payload, idempotencyKey } as ClientEventMap[K];
-      return emitWithAck(event, payloadWithKey, timeoutMs);
+      return emitWithAck(event, toWirePayload(event, payload), timeoutMs);
     },
     []
+  );
+
+  const emitNoAck = useCallback(
+    <K extends ClientEventType>(
+      event: K,
+      payload: Omit<ClientEventMap[K], 'idempotencyKey'>,
+    ): void => {
+      socket?.emit(event, toWirePayload(event, payload));
+    },
+    [socket],
   );
 
   const on = useCallback(
@@ -56,6 +79,7 @@ export function useSocket() {
     connect,
     disconnect,
     emit,
+    emitNoAck,
     on,
     off,
     isConnected: status === 'connected',

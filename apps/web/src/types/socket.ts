@@ -116,7 +116,7 @@ export type ClientEvent =
   | { type: 'message_send'; payload: { channelId: string; content: string; idempotencyKey: string } }
   | { type: 'message_edit'; payload: { channelId: string; messageId: string; content: string; idempotencyKey: string } }
   | { type: 'message_delete'; payload: { channelId: string; messageId: string; idempotencyKey: string } }
-  | { type: 'typing'; payload: { channelId: string; typing: boolean } }
+  | { type: 'typing'; payload: { channelId: string } }
   | { type: 'catch_up'; payload: { channels: CatchUpRequest[] } };
 
 export type ServerEventType = ServerEvent['type'];
@@ -138,8 +138,8 @@ export type ClientEventMap = {
   message_send: { channelId: string; content: string; idempotencyKey: string };
   message_edit: { channelId: string; messageId: string; content: string; idempotencyKey: string };
   message_delete: { channelId: string; messageId: string; idempotencyKey: string };
-  typing: { channelId: string; typing: boolean; idempotencyKey: string };
-  catch_up: { channels: CatchUpRequest[]; idempotencyKey: string };
+  typing: { channelId: string };
+  catch_up: { channels: CatchUpRequest[] };
 };
 
 export type AckResponseMap = {

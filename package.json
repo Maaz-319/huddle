@@ -8,6 +8,7 @@
     "dev": "npm run start:dev -w @huddle/api",
     "build": "npm run build -w @huddle/api",
     "test": "npm run test -w @huddle/api",
+    "test:web": "npm run test -w @huddle/web",
     "test:integration": "npm run test:integration -w @huddle/api",
     "test:e2e": "npm run test:e2e -w @huddle/api",
     "lint": "npm run lint -w @huddle/api",

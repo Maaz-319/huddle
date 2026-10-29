@@ -19,6 +19,7 @@ import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
 import { InviteDialog } from '@/components/servers/InviteDialog';
 import { useContextMenu } from '@/hooks/useContextMenu';
+import { useMyRole } from '@/hooks/useMyRole';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface Server {
@@ -32,13 +33,17 @@ interface Server {
 
 export function ServerList() {
   const { servers, currentServerId, createServer, deleteServer } = useServerStore();
-  const { closeAllDrawers } = useUIStore();
+  const {
+    closeAllDrawers,
+    isCreateServerDialogOpen,
+    setCreateServerDialogOpen,
+  } = useUIStore();
   const navigate = useNavigate();
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createIconUrl, setCreateIconUrl] = useState('');
   const [creating, setCreating] = useState(false);
   const serverMenu = useContextMenu<Server>();
+  const menuServerRole = useMyRole(serverMenu.state?.target.id ?? null);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [inviteDialogServerId, setInviteDialogServerId] = useState<string | null>(null);
 
@@ -49,7 +54,7 @@ export function ServerList() {
     setCreating(true);
     try {
       const newServer = await createServer(createName.trim(), createIconUrl.trim() || null);
-      setShowCreateDialog(false);
+      setCreateServerDialogOpen(false);
       setCreateName('');
       setCreateIconUrl('');
       navigate({ to: `/app/${newServer.id}` });
@@ -81,7 +86,7 @@ export function ServerList() {
   };
 
   const createServerDialog = (
-    <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+    <Dialog open={isCreateServerDialogOpen} onOpenChange={setCreateServerDialogOpen}>
       <DialogContent className="max-w-md">
         <DialogTitle>Create Server</DialogTitle>
         <DialogDescription>Give your server a name and optional icon</DialogDescription>
@@ -114,7 +119,7 @@ export function ServerList() {
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setShowCreateDialog(false)}>
+            <Button type="button" variant="ghost" onClick={() => setCreateServerDialogOpen(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={creating || !createName.trim()}>
@@ -133,26 +138,12 @@ export function ServerList() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowCreateDialog(true)}
+            onClick={() => setCreateServerDialogOpen(true)}
             className="text-text-secondary hover:text-text-primary"
             aria-label="Create server"
           >
             <Plus className="h-5 w-5" />
           </Button>
-        </div>
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center">
-            <p className="text-text-muted text-sm">No servers yet</p>
-            <Button
-              variant="primary"
-              size="sm"
-              className="mt-2"
-              onClick={() => setShowCreateDialog(true)}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Create Server
-            </Button>
-          </div>
         </div>
         {createServerDialog}
       </div>
@@ -165,7 +156,7 @@ export function ServerList() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setShowCreateDialog(true)}
+          onClick={() => setCreateServerDialogOpen(true)}
           className="text-text-secondary hover:text-text-primary"
           aria-label="Create server"
         >
@@ -251,7 +242,7 @@ export function ServerList() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setShowCreateDialog(true)}
+          onClick={() => setCreateServerDialogOpen(true)}
           className="w-full text-text-secondary hover:text-text-primary"
           aria-label="Create server"
         >
@@ -301,13 +292,15 @@ export function ServerList() {
                 Server Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => handleDeleteServer(serverMenu.state!.target.id)}
-                className="text-accent-warn focus:text-accent-warn"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Server
-              </DropdownMenuItem>
+              {menuServerRole === 'owner' && (
+                <DropdownMenuItem
+                  onClick={() => handleDeleteServer(serverMenu.state!.target.id)}
+                  className="text-accent-warn focus:text-accent-warn"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Server
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </>
         )}

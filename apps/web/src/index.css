@@ -5,21 +5,22 @@
 @import "@fontsource/ibm-plex-sans/700.css";
 
 @theme {
-  /* Colors - Dark mode only, Discord-inspired */
-  --color-bg-base: #16171d;
-  --color-bg-raised: #1e1f26;
-  --color-bg-overlay: #25262e;
-  --color-border-subtle: #2e303a;
-  --color-border-focus: #00ff88;
-  --color-text-primary: #f3f4f6;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
-  --color-accent-electric: #00ff88;
-  /* Single accent: primary IS the electric green. Never pair with white
-     text — green is bright; use text-bg-base on green fills. */
-  --color-accent-primary: #00ff88;
-  --color-accent-warn: #ed4245;
-  --color-accent-muted: #4f545c;
+  /* Huddle's forest-charcoal surfaces and quieter signal green. */
+  --color-bg-base: #101715;
+  --color-bg-raised: #18221f;
+  --color-bg-overlay: #202c28;
+  --color-border-subtle: #35433d;
+  --color-border-focus: #75dfae;
+  --color-text-primary: #e7f0eb;
+  --color-text-secondary: #b5c2bb;
+  --color-text-muted: #89978f;
+  --color-accent-electric: #66d8a5;
+  --color-accent-primary: #66d8a5;
+  --color-accent-warn: #f17979;
+  --color-accent-muted: #65716c;
+  --color-accent-info: #7cb9e8;
+  --color-accent-owner: #c5a7f5;
+  --color-accent-offline: #75827b;
 
   /* Font Family */
   --font-family-sans: 'IBM Plex Sans', system-ui, sans-serif;
@@ -58,6 +59,26 @@
 :root {
   /* Vertical rhythm inside the transcript; SettingsPage writes this at runtime. */
   --msg-gap: 8px;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --color-bg-base: #f3f7f4;
+  --color-bg-raised: #e7efeb;
+  --color-bg-overlay: #ffffff;
+  --color-border-subtle: #cedad3;
+  --color-border-focus: #14754f;
+  --color-text-primary: #1d2922;
+  --color-text-secondary: #46574e;
+  --color-text-muted: #637268;
+  --color-accent-electric: #087b52;
+  --color-accent-primary: #087b52;
+  --color-accent-warn: #b4232b;
+  --color-accent-muted: #829087;
+  --color-accent-info: #24628c;
+  --color-accent-owner: #6740a8;
+  --color-accent-offline: #748078;
+  color-scheme: light;
 }
 
 /*
@@ -175,6 +196,7 @@ body {
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
   line-height: 1.5;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 #root {
@@ -216,6 +238,30 @@ body {
 ::selection {
   background: var(--color-accent-primary);
   color: var(--color-bg-base);
+}
+
+button,
+[role='button'],
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+/* Long names, invite URLs, and message text must not widen a flex column. */
+#root,
+#root > *,
+main,
+section {
+  min-width: 0;
+}
+
+pre,
+code {
+  overflow-wrap: anywhere;
 }
 
 /* Reduced motion */

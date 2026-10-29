@@ -220,41 +220,44 @@ export function ServerSettings() {
   const visibleSections = sections.filter((s) => !s.ownerOnly || isOwner);
 
   return (
-    <div className="flex h-full min-h-0 bg-bg-base">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-bg-base sm:flex-row">
       {/* Section nav */}
-      <nav className="w-56 shrink-0 border-r border-border-subtle p-4 flex flex-col gap-1" aria-label="Server settings sections">
+      <nav className="flex w-full shrink-0 flex-col gap-2 border-b border-border-subtle p-3 sm:w-56 sm:gap-1 sm:border-b-0 sm:border-r sm:p-4" aria-label="Server settings sections">
         <Link
           to="/app/$serverId"
           params={{ serverId }}
-          className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary transition-colors mb-4 px-2 py-1"
+          className="flex min-w-0 items-center gap-2 px-2 py-1 text-sm text-text-secondary transition-colors hover:text-text-primary sm:mb-4"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to {server.name}
+          <span className="truncate">Back to {server.name}</span>
         </Link>
-        {visibleSections.map((s) => {
-          const Icon = s.icon;
-          return (
-            <button
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className={cn(
-                'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors text-left',
-                section === s.id
-                  ? 'bg-accent-primary/10 text-accent-primary'
-                  : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary',
-                s.id === 'danger' && section !== 'danger' && 'text-accent-warn hover:text-accent-warn'
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {s.label}
-            </button>
-          );
-        })}
+        <div className="flex min-w-0 gap-1 overflow-x-auto pb-1 sm:flex-col sm:overflow-visible sm:pb-0">
+          {visibleSections.map((s) => {
+            const Icon = s.icon;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setSection(s.id)}
+                aria-current={section === s.id ? 'page' : undefined}
+                className={cn(
+                  'flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors sm:w-full',
+                  section === s.id
+                    ? 'bg-accent-primary/10 text-accent-primary'
+                    : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary',
+                  s.id === 'danger' && section !== 'danger' && 'text-accent-warn hover:text-accent-warn'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Section content */}
-      <div className="flex-1 min-w-0 overflow-y-auto p-8">
-        <div className="max-w-2xl">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
+        <div className="mx-auto max-w-2xl">
           {section === 'overview' && (
             <div>
               <h1 className="text-xl font-semibold text-text-primary mb-1">Overview</h1>
@@ -342,7 +345,7 @@ export function ServerSettings() {
                       </div>
 
                       {member.role === 'owner' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-purple-500/20 text-purple-400">
+                        <span className="inline-flex items-center gap-1 rounded bg-accent-owner/10 px-2 py-1 text-xs font-medium text-accent-owner">
                           <ShieldCheck className="h-3 w-3" />
                           Owner
                         </span>
@@ -360,7 +363,7 @@ export function ServerSettings() {
                       ) : (
                         <span className={cn(
                           'px-2 py-1 rounded text-xs font-medium',
-                          member.role === 'moderator' ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'
+                          member.role === 'moderator' ? 'bg-accent-info/10 text-accent-info' : 'bg-bg-raised text-text-muted'
                         )}>
                           {member.role === 'moderator' ? 'Moderator' : 'Member'}
                         </span>
@@ -458,7 +461,7 @@ export function ServerSettings() {
               <h1 className="text-xl font-semibold text-accent-warn mb-1">Danger zone</h1>
               <p className="text-text-muted text-sm mb-6">Irreversible actions.</p>
 
-              <div className="border border-accent-warn/30 rounded-lg p-4 bg-red-950/20">
+              <div className="rounded-lg border border-accent-warn/30 bg-accent-warn/5 p-4">
                 <h2 className="text-sm font-medium text-accent-warn flex items-center gap-2">
                   <Trash2 className="h-4 w-4" />
                   Delete this server

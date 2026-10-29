@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
@@ -7,21 +7,55 @@ import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { toast } from '@/stores/toastStore';
-import { apiClient } from '@/api/client';
+import { apiClient, isApiError } from '@/api/client';
 import { applyCatchUpReply } from '@/hooks/useMessages';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
 import { MemberSidebar } from './MemberSidebar';
 import { BottomNav, MobileHeader } from './BottomNav';
 import { cn } from '@/components/ui/cn';
+import { Button } from '@/components/ui/button';
+import { Plus, Users } from 'lucide-react';
 import { useGlobalErrorHandler } from '@/hooks/useGlobalErrorHandler';
 import { useBreakpoints } from '@/hooks/useBreakpoints';
 import { ErrorBoundary, FeatureErrorFallback } from '@/components/ui';
 
+function NoServersWelcome({ onCreateServer }: { onCreateServer: () => void }) {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto p-6 sm:p-10">
+      <section className="w-full max-w-lg text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-primary/10 text-accent-primary">
+          <Users className="h-8 w-8" aria-hidden="true" />
+        </div>
+        <h1 className="mt-6 text-2xl font-semibold text-text-primary sm:text-3xl">
+          Start your first server
+        </h1>
+        <p className="mx-auto mt-3 max-w-md text-text-secondary">
+          Create a space for your people. Add channels, invite members, and start talking.
+        </p>
+        <Button onClick={onCreateServer} className="mt-6">
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Create a server
+        </Button>
+        <p className="mt-5 text-sm text-text-muted">
+          Already have an invite? Open its link to join a server.
+        </p>
+      </section>
+    </div>
+  );
+}
+
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
   const { socket, status, connect, emit, on, isConnected } = useSocket();
-  const { currentServerId, servers, fetchServers, setCurrentServerId } = useServerStore();
+  const {
+    currentServerId,
+    servers,
+    hasFetched: hasFetchedServers,
+    error: serversError,
+    fetchServers,
+    setCurrentServerId,
+  } = useServerStore();
   const { fetchChannels, setCurrentChannelId } = useChannelStore();
   const {
     isChannelListOpen,
@@ -29,11 +63,15 @@ export function AppShell() {
     isServerListOpen,
     setChannelListOpen,
     setMemberSidebarOpen,
+    setActiveMobileTab,
+    setCreateServerDialogOpen,
     closeAllDrawers
   } = useUIStore();
   const { isMobile } = useBreakpoints();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
+  const showServerPanels = Boolean(currentServerId || params.serverId);
+  const probingServersRef = useRef<Set<string>>(new Set());
 
   // Global error handler
   useGlobalErrorHandler();
@@ -56,10 +94,11 @@ export function AppShell() {
   useEffect(() => {
     setCurrentServerId(params.serverId ?? null);
     setCurrentChannelId(params.channelId ?? null);
+    setActiveMobileTab('messages');
     if (params.serverId) {
       fetchChannels(params.serverId);
     }
-  }, [params.serverId, params.channelId, setCurrentServerId, setCurrentChannelId, fetchChannels]);
+  }, [params.serverId, params.channelId, setCurrentServerId, setCurrentChannelId, setActiveMobileTab, fetchChannels]);
 
   // Connect socket when authenticated
   useEffect(() => {
@@ -85,7 +124,43 @@ export function AppShell() {
       channelStore.onChannelAdded(channelId);
     });
     const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
+      const emptiedServerId = (() => {
+        for (const [sid, channels] of useChannelStore.getState().channelsByServer.entries()) {
+          if (channels.some((c) => c.id === channelId)) {
+            return channels.length === 1 ? sid : null;
+          }
+        }
+        return null;
+      })();
+
       channelStore.onChannelRemoved(channelId);
+
+      if (!emptiedServerId || probingServersRef.current.has(emptiedServerId)) return;
+      probingServersRef.current.add(emptiedServerId);
+
+      void (async () => {
+        try {
+          await apiClient.get(`/servers/${emptiedServerId}`);
+        } catch (error) {
+          if (
+            isApiError(error) &&
+            (error.status === 404 || error.status === 403)
+          ) {
+            const wasActive =
+              useServerStore.getState().currentServerId === emptiedServerId;
+            useServerStore.getState().removeServer(emptiedServerId);
+            if (wasActive) {
+              toast.error(
+                'Server unavailable',
+                'You no longer have access to this server.',
+              );
+              navigate({ to: '/app' });
+            }
+          }
+        } finally {
+          probingServersRef.current.delete(emptiedServerId);
+        }
+      })();
     });
 
     return () => {
@@ -93,7 +168,7 @@ export function AppShell() {
       cleanupChannelAdded();
       cleanupChannelRemoved();
     };
-  }, [socket, on]);
+  }, [socket, on, navigate]);
 
   // Catch up on reconnect: every channel the client holds state for, in one
   // frame (not one per channel — that's the reconnection storm the frame
@@ -187,7 +262,9 @@ export function AppShell() {
             hugs the left edge instead of leaving a dead strip. */}
         <div className={cn(
           'flex-shrink-0 h-full min-w-0 transition-all duration-200',
-          isMobile
+          !showServerPanels
+            ? 'hidden'
+            : isMobile
             ? (isChannelListOpen
               ? 'w-64 fixed bg-bg-base border-r border-border-subtle shadow-xl z-30 animate-in slide-in-from-left-2'
               : 'w-0 overflow-hidden')
@@ -211,14 +288,30 @@ export function AppShell() {
             fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => params.channelId && apiClient.get(`/channels/${params.channelId}/messages`)} />}
             resetKeys={[params.channelId]}
           >
-            <Outlet />
+            {servers.length === 0 && hasFetchedServers && !serversError ? (
+              <NoServersWelcome onCreateServer={() => setCreateServerDialogOpen(true)} />
+            ) : servers.length === 0 && !hasFetchedServers ? (
+              <div className="flex h-full items-center justify-center" role="status" aria-label="Loading servers">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-accent-primary border-t-transparent" />
+              </div>
+            ) : servers.length === 0 && serversError ? (
+              <FeatureErrorFallback
+                title="Servers"
+                description="Could not load your servers"
+                onRetry={() => fetchServers()}
+              />
+            ) : (
+              <Outlet />
+            )}
           </ErrorBoundary>
         </div>
 
         {/* Member sidebar — collapsible everywhere, drawer on mobile */}
         <div className={cn(
           'flex-shrink-0 h-full min-w-0 transition-all duration-200',
-          isMobile
+          !showServerPanels
+            ? 'hidden'
+            : isMobile
             ? (isMemberSidebarOpen
               ? 'w-64 fixed right-0 bg-bg-base border-l border-border-subtle shadow-xl z-30 animate-in slide-in-from-right-2'
               : 'w-0 overflow-hidden')
@@ -237,17 +330,16 @@ export function AppShell() {
 
       {/* Scrim for mobile drawers — below the drawers (z-30), above content */}
       {(isMobile && (isChannelListOpen || isMemberSidebarOpen || isServerListOpen)) && (
-        <div
-          className="fixed inset-0 bg-black/50 z-20"
+        <button
+          className="fixed inset-0 z-20 border-0 bg-black/50 p-0"
           onClick={closeAllDrawers}
-          role="button"
-          tabIndex={-1}
+          type="button"
           aria-label="Close menu"
         />
       )}
 
       {/* Bottom Navigation - Mobile only */}
-      <BottomNav />
+      <BottomNav hasServers={servers.length > 0} />
     </div>
   );
 }

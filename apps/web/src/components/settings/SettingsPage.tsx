@@ -20,12 +20,34 @@ import {
 import { RadioGroupRoot, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from '@/stores/toastStore';
 import { Loader2, User, Shield, LogOut, Trash2, Palette, ArrowLeft } from 'lucide-react';
+import {
+  readThemePreference,
+  saveThemePreference,
+  type ThemePreference,
+} from '@/utils/theme';
+
+const THEME_OPTIONS: Array<{
+  value: ThemePreference;
+  label: string;
+  description: string;
+}> = [
+  { value: 'system', label: 'System', description: 'Match your device setting' },
+  { value: 'dark', label: 'Dark', description: 'A quiet charcoal workspace' },
+  { value: 'light', label: 'Light', description: 'A clear, bright workspace' },
+];
+
+function themePreferenceFrom(value: string): ThemePreference | null {
+  return value === 'system' || value === 'light' || value === 'dark'
+    ? value
+    : null;
+}
 
 export function SettingsPage() {
   const { user, logout, deleteAccount } = useAuthStore();
   const navigate = useNavigate();
   const [bio, setBio] = useState(user?.bio ?? '');
   const [saving, setSaving] = useState(false);
+  const [themePreference, setThemePreference] = useState(readThemePreference);
   const [density, setDensity] = useState<'compact' | 'cozy'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('messageDensity') as 'compact' | 'cozy') ?? 'compact';
@@ -61,6 +83,14 @@ export function SettingsPage() {
     toast.success('Density updated', `Message density set to ${value}`);
   };
 
+  const handleThemeChange = (value: string) => {
+    const preference = themePreferenceFrom(value);
+    if (preference === null) return;
+
+    setThemePreference(preference);
+    saveThemePreference(preference);
+  };
+
   const handleLogout = async () => {
     await logout();
   };
@@ -78,7 +108,7 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-y-auto max-w-2xl mx-auto w-full p-6">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-y-auto px-4 py-5 sm:mx-auto sm:max-w-2xl sm:p-6">
       <div className="mb-6 flex items-center gap-3">
         <Button
           variant="ghost"
@@ -95,24 +125,24 @@ export function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="w-full">
-        <TabsList className="inline-flex h-auto p-1 gap-1 bg-bg-raised rounded-lg max-w-full overflow-x-auto">
-          <TabsTrigger value="profile">
-            <User className="h-4 w-4 mr-2" />
+        <TabsList className="inline-flex h-auto w-full max-w-full gap-1 overflow-x-auto rounded-lg bg-bg-raised p-1 sm:w-fit">
+          <TabsTrigger value="profile" className="min-w-0 flex-1 px-2 sm:flex-none sm:px-3">
+            <User className="mr-1 h-4 w-4 sm:mr-2" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="appearance">
-            <Palette className="h-4 w-4 mr-2" />
+          <TabsTrigger value="appearance" className="min-w-0 flex-1 px-2 sm:flex-none sm:px-3">
+            <Palette className="mr-1 h-4 w-4 sm:mr-2" />
             Appearance
           </TabsTrigger>
-          <TabsTrigger value="account">
-            <Shield className="h-4 w-4 mr-2" />
+          <TabsTrigger value="account" className="min-w-0 flex-1 px-2 sm:flex-none sm:px-3">
+            <Shield className="mr-1 h-4 w-4 sm:mr-2" />
             Account
           </TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
         <TabsContent value="profile" className="mt-6 space-y-6">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <div className="relative">
               {user?.avatarUrl ? (
                 <img
@@ -131,9 +161,9 @@ export function SettingsPage() {
                 </div>
               )}
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 className="text-xl font-semibold text-text-primary">{user?.username}</h2>
-              <p className="text-text-muted text-sm">{user?.email}</p>
+              <p className="break-all text-sm text-text-muted">{user?.email}</p>
             </div>
           </div>
 
@@ -201,24 +231,60 @@ export function SettingsPage() {
         {/* Appearance Tab */}
         <TabsContent value="appearance" className="mt-6 space-y-6">
           <div>
+            <h3 className="mb-2 text-lg font-medium text-text-primary">Color theme</h3>
+            <p className="mb-4 text-sm text-text-muted">Choose how Huddle looks on this device</p>
+            <RadioGroupRoot
+              value={themePreference}
+              onValueChange={handleThemeChange}
+              aria-label="Color theme"
+              className="grid gap-2 sm:grid-cols-3"
+            >
+              {THEME_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  htmlFor={`theme-${option.value}`}
+                  className="flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border border-border-subtle p-3 transition-colors hover:bg-bg-raised sm:p-4"
+                >
+                  <RadioGroupItem
+                    id={`theme-${option.value}`}
+                    value={option.value}
+                    aria-labelledby={`theme-label-${option.value}`}
+                    className="mt-1 shrink-0"
+                  />
+                  <span className="min-w-0">
+                    <span id={`theme-label-${option.value}`} className="block font-medium text-text-primary">
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-text-muted">
+                      {option.description}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </RadioGroupRoot>
+          </div>
+
+          <Separator />
+
+          <div>
             <h3 className="text-lg font-medium text-text-primary mb-4">Message Density</h3>
             <p className="text-text-muted text-sm mb-4">Control how compact messages appear in chat</p>
 
             <RadioGroupRoot value={density} onValueChange={handleDensityChange} className="space-y-3">
-              <div className="flex items-center gap-3 p-4 border border-border-subtle rounded-lg hover:bg-bg-raised/50 transition-colors cursor-pointer">
-                <RadioGroupItem value="compact" className="mt-0.5" />
+              <label htmlFor="density-compact" className="flex cursor-pointer items-center gap-3 rounded-lg border border-border-subtle p-4 transition-colors hover:bg-bg-raised/50">
+                <RadioGroupItem id="density-compact" value="compact" className="mt-0.5 shrink-0" />
                 <div className="flex-1">
-                  <label className="font-medium text-text-primary cursor-pointer">Compact</label>
+                  <span className="font-medium text-text-primary">Compact</span>
                   <p className="text-xs text-text-muted mt-0.5">Tighter spacing, more messages visible (Discord-like)</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-3 p-4 border border-border-subtle rounded-lg hover:bg-bg-raised/50 transition-colors cursor-pointer">
-                <RadioGroupItem value="cozy" className="mt-0.5" />
+              </label>
+              <label htmlFor="density-cozy" className="flex cursor-pointer items-center gap-3 rounded-lg border border-border-subtle p-4 transition-colors hover:bg-bg-raised/50">
+                <RadioGroupItem id="density-cozy" value="cozy" className="mt-0.5 shrink-0" />
                 <div className="flex-1">
-                  <label className="font-medium text-text-primary cursor-pointer">Cozy</label>
+                  <span className="font-medium text-text-primary">Cozy</span>
                   <p className="text-xs text-text-muted mt-0.5">More breathing room between messages</p>
                 </div>
-              </div>
+              </label>
             </RadioGroupRoot>
           </div>
 
@@ -264,7 +330,7 @@ export function SettingsPage() {
             </Button>
           </div>
 
-          <div className="border border-accent-warn/30 rounded-lg p-4 bg-red-950/20">
+          <div className="rounded-lg border border-accent-warn/30 bg-accent-warn/5 p-4">
             <h3 className="font-medium text-accent-warn mb-2 flex items-center gap-2">
               <Trash2 className="h-5 w-5" />
               Delete Account
