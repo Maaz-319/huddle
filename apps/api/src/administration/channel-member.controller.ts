@@ -16,13 +16,9 @@ import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AddChannelMemberDto } from './add-channel-member.dto';
 import { AdministrationService } from './administration.service';
 import type { ChannelMember } from './channel-member-repository.interface';
+import type { ChannelMemberResponse } from '@huddle/contracts';
 
-/** The shape every channel-member route returns — ids serialised per AGENTS.md section 4. */
-export interface ChannelMemberResponse {
-  channelId: string;
-  userId: string;
-  addedAt: string;
-}
+export type { ChannelMemberResponse } from '@huddle/contracts';
 
 function toChannelMemberResponse(member: ChannelMember): ChannelMemberResponse {
   return {

@@ -1,0 +1,18 @@
+{
+  "name": "@huddle/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/write-package-metadata.mjs"
+  }
+}

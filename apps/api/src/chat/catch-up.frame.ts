@@ -4,8 +4,7 @@ import {
   IsSnowflake,
   TransformSnowflake,
 } from '../common/is-snowflake.decorator';
-import type { MessageResponse } from './message-response';
-import { AckFailure, parseFrame } from './socket-frame';
+import { parseFrame } from './socket-frame';
 
 /**
  * How many messages one channel hands back in a single catch-up reply (#68).
@@ -62,32 +61,11 @@ export class CatchUpFrameDto {
   channels!: CatchUpChannelDto[];
 }
 
-/**
- * What one channel's entry in the reply carries: the messages after the id
- * the client named, oldest → newest (`getHistory`'s order in both
- * directions), and whether the per-channel cap cut the list short.
- *
- * `truncated` is the client's instruction, not decoration: true means "this
- * list is not the whole gap — load history the normal way instead of
- * rendering it".
- */
-export interface CatchUpChannelResponse {
-  channelId: string;
-  messages: MessageResponse[];
-  truncated: boolean;
-}
-
-/**
- * Success: the reply itself. It answers in the ack rather than as a
- * broadcast, because this is a reply to one client — nobody else is behind,
- * and nobody else should see what one caller asked for.
- */
-export interface CatchUpSuccess {
-  channels: CatchUpChannelResponse[];
-}
-
-/** The direct reply to the sender: the catch-up, or the shared failure shape. */
-export type CatchUpAck = CatchUpSuccess | AckFailure;
+export type {
+  CatchUpAck,
+  CatchUpChannelResponse,
+  CatchUpSuccess,
+} from '@huddle/contracts';
 
 /** Validates a raw `catch_up` payload — see `parseFrame` for the why. */
 export function parseCatchUpFrame(raw: unknown): Promise<CatchUpFrameDto> {

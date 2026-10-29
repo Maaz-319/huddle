@@ -2,7 +2,8 @@ import {
   IsSnowflake,
   TransformSnowflake,
 } from '../common/is-snowflake.decorator';
-import { AckFailure, parseFrame } from './socket-frame';
+import { parseFrame } from './socket-frame';
+export type { TypingAck, TypingBroadcast } from '@huddle/contracts';
 
 /**
  * The client → server `typing` frame (chat-service.md section 7): one
@@ -24,26 +25,11 @@ export class TypingFrameDto {
 }
 
 /**
- * What comes back to the sender: **failures only** — refusals ride the
- * ack with the same `AckFailure` shape every other frame sends, and a
- * frame that was accepted or debounced never calls the ack at all. There
- * is nothing the typist's own client needs to hear: it already knows it is
- * typing, and the drop-vs-broadcast distinction is invisible to the person
- * whose window it is (#67's design decision).
- */
-export type TypingAck = AckFailure;
-
-/**
  * The server → client `typing` payload, broadcast to the channel's room
  * **excluding the sender**. `userId` is the authenticated caller's, as a
  * Snowflake string — identity never comes from the frame (chat-service.md
  * section 7).
  */
-export interface TypingBroadcast {
-  channelId: string;
-  userId: string;
-}
-
 /** Validates a raw `typing` payload — see `parseFrame` for the why. */
 export function parseTypingFrame(raw: unknown): Promise<TypingFrameDto> {
   return parseFrame(TypingFrameDto, raw);

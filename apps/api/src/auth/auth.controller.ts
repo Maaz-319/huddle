@@ -22,15 +22,7 @@ import { SessionAuthGuard } from './session-auth.guard';
 import { ParseSnowflakeArrayPipe } from '../common/parse-snowflake-array.pipe';
 import { UpdateBioDto } from './update-bio.dto';
 import type { User } from './user-repository.interface';
-
-/** The shape `GET`/`PATCH /auth/me` return — a `User`, id serialised per AGENTS.md section 4. */
-interface MeResponse {
-  id: string;
-  username: string;
-  avatarUrl: string;
-  email: string;
-  bio: string | null;
-}
+import type { MeResponse } from '@huddle/contracts';
 
 function toMeResponse(user: User): MeResponse {
   return {

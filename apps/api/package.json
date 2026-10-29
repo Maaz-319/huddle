@@ -5,6 +5,18 @@
   "description": "Huddle NestJS backend: servers, channels, real-time chat, and presence.",
   "license": "UNLICENSED",
   "scripts": {
+    "prebuild": "npm run build -w @huddle/contracts",
+    "prestart": "npm run build -w @huddle/contracts",
+    "prestart:dev": "npm run build -w @huddle/contracts",
+    "prestart:debug": "npm run build -w @huddle/contracts",
+    "prelint": "npm run build -w @huddle/contracts",
+    "prelint:ci": "npm run build -w @huddle/contracts",
+    "pretest": "npm run build -w @huddle/contracts",
+    "pretest:watch": "npm run build -w @huddle/contracts",
+    "pretest:cov": "npm run build -w @huddle/contracts",
+    "pretest:debug": "npm run build -w @huddle/contracts",
+    "pretest:integration": "npm run build -w @huddle/contracts",
+    "pretest:e2e": "npm run build -w @huddle/contracts",
     "build": "nest build",
     "postinstall": "prisma generate",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -25,6 +37,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@huddle/contracts": "0.0.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",

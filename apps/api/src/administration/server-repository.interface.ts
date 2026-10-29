@@ -1,4 +1,5 @@
 import { Invite } from './invite-repository.interface';
+import type { ChannelCreationPolicy } from '@huddle/contracts';
 
 /**
  * A Huddle server, as the rest of the application sees one.
@@ -11,7 +12,7 @@ export interface Server {
   id: bigint;
   name: string;
   iconUrl: string | null;
-  channelCreationPolicy: 'owner_only' | 'everyone' | 'mods_only';
+  channelCreationPolicy: ChannelCreationPolicy;
   memberInviteToggle: boolean;
   createdAt: Date;
 }

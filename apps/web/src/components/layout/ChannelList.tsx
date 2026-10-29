@@ -24,14 +24,9 @@ import { OverridesDrawer } from '@/components/channels/OverridesDrawer';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { useServerStore } from '@/stores/serverStore';
+import type { ChannelResponse } from '@/types/channel';
 
-interface Channel {
-  id: string;
-  serverId: string;
-  name: string;
-  isPrivate: boolean;
-  createdAt: string;
-}
+type Channel = ChannelResponse;
 
 export function ChannelList() {
   const params = useParams({ strict: false }) as { serverId?: string };

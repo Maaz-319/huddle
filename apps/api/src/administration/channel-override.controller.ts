@@ -15,13 +15,9 @@ import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import type { ChannelOverride } from './channel-override-repository.interface';
 import { ChannelOverrideParams } from './channel-override.params';
+import type { ChannelOverrideResponse } from '@huddle/contracts';
 
-/** A revoked (role, capability) pair — ids serialised per AGENTS.md section 4. */
-export interface ChannelOverrideResponse {
-  channelId: string;
-  role: string;
-  capability: string;
-}
+export type { ChannelOverrideResponse } from '@huddle/contracts';
 
 function toChannelOverrideResponse(
   override: ChannelOverride,

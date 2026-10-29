@@ -4,7 +4,8 @@ import {
   TransformSnowflake,
 } from '../common/is-snowflake.decorator';
 import { SendMessageDto } from './send-message.dto';
-import { AckFailure, IDEMPOTENCY_KEY_MAX, parseFrame } from './socket-frame';
+import { IDEMPOTENCY_KEY_MAX, parseFrame } from './socket-frame';
+export type { SendAck, SendAckSuccess } from '@huddle/contracts';
 
 /**
  * The client → server `message_send` frame (chat-service.md section 4).
@@ -31,21 +32,12 @@ export class MessageSendFrameDto extends SendMessageDto {
   idempotencyKey!: string;
 }
 
-/** Success: the optimistic bubble is swapped for the real message. */
-export interface SendAckSuccess {
-  idempotencyKey: string;
-  messageId: string;
-  createdAt: string;
-}
-
 /**
  * The direct reply to the sender, separate from the `message_create`
  * broadcast (chat-service.md section 4): it goes through socket.io's emit
  * acknowledgement — literally an "ack" — and so reaches only the client that
  * sent the frame, scoped to that one event.
  */
-export type SendAck = SendAckSuccess | AckFailure;
-
 /**
  * Validates a raw `message_send` payload — the rules themselves are
  * `parseFrame`'s (see `socket-frame.ts` for why validation lives there and
