@@ -22,7 +22,9 @@ export class RequestOriginGuard implements CanActivate {
     if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return true;
 
     const expected = this.config.get('WEB_ORIGIN', { infer: true });
-    if (!isRequestOriginAllowed(request.method, request.headers.origin, expected)) {
+    if (
+      !isRequestOriginAllowed(request.method, request.headers.origin, expected)
+    ) {
       throw new ForbiddenException('Request origin is not allowed');
     }
 

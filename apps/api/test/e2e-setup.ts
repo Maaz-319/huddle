@@ -17,6 +17,8 @@ EventEmitter.defaultMaxListeners = 100;
 // E2E HTTP clients represent the configured web app. Keep their default
 // Origin aligned with WEB_ORIGIN; security-specific cases can still use an
 // isolated guard test to supply a mismatched or missing origin.
+// The original method is called with the current Test instance via .call below.
+// eslint-disable-next-line @typescript-eslint/unbound-method -- this binding is preserved explicitly with .call(this)
 const originalEnd = request.Test.prototype.end;
 request.Test.prototype.end = function (
   this: request.Test,

@@ -70,6 +70,12 @@ function sorted(values: Iterable<string>): string[] {
   return [...values].sort();
 }
 
+function connectedSocketId(socket: Socket): string {
+  const { id } = socket;
+  if (id === undefined) throw new Error('Connected socket has no ID');
+  return id;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -403,6 +409,7 @@ describe('the WebSocket transport (e2e)', () => {
     it('disconnects the socket when its session logs out', async () => {
       const { agent, cookie } = await logIn(OWNER);
       const socket = await connect(cookie);
+      const socketId = connectedSocketId(socket);
       const disconnected = new Promise<void>((resolve) => {
         socket.once('disconnect', () => resolve());
       });
@@ -410,7 +417,7 @@ describe('the WebSocket transport (e2e)', () => {
       const logout = await agent.post('/auth/logout');
       expect(logout.status).toBe(204);
       await disconnected;
-      expect(gateway.server.sockets.sockets.has(socket.id)).toBe(false);
+      expect(gateway.server.sockets.sockets.has(socketId)).toBe(false);
     });
 
     it('disconnects every socket for a user when their account is deleted', async () => {
@@ -418,6 +425,8 @@ describe('the WebSocket transport (e2e)', () => {
       const second = await logIn(OWNER);
       const firstSocket = await connect(first.cookie);
       const secondSocket = await connect(second.cookie);
+      const firstSocketId = connectedSocketId(firstSocket);
+      const secondSocketId = connectedSocketId(secondSocket);
       const firstDisconnected = new Promise<void>((resolve) => {
         firstSocket.once('disconnect', () => resolve());
       });
@@ -428,13 +437,14 @@ describe('the WebSocket transport (e2e)', () => {
       const deletion = await first.agent.delete('/auth/me');
       expect(deletion.status).toBe(204);
       await Promise.all([firstDisconnected, secondDisconnected]);
-      expect(gateway.server.sockets.sockets.has(firstSocket.id)).toBe(false);
-      expect(gateway.server.sockets.sockets.has(secondSocket.id)).toBe(false);
+      expect(gateway.server.sockets.sockets.has(firstSocketId)).toBe(false);
+      expect(gateway.server.sockets.sockets.has(secondSocketId)).toBe(false);
     });
 
     it('disconnects when the Redis session expires while the socket is open', async () => {
       const { cookie } = await logIn(OWNER);
       const socket = await connect(cookie);
+      const socketId = connectedSocketId(socket);
       const disconnected = new Promise<void>((resolve) => {
         socket.once('disconnect', () => resolve());
       });
@@ -447,12 +457,13 @@ describe('the WebSocket transport (e2e)', () => {
       }
       await redis.del(`huddle:sess:${sessionId}`);
 
-      const serverSocket = gateway.server.sockets.sockets.get(socket.id);
-      if (serverSocket === undefined) throw new Error('Server socket not found');
+      const serverSocket = gateway.server.sockets.sockets.get(socketId);
+      if (serverSocket === undefined)
+        throw new Error('Server socket not found');
       serverSocket.conn.emit('heartbeat');
 
       await disconnected;
-      expect(gateway.server.sockets.sockets.has(socket.id)).toBe(false);
+      expect(gateway.server.sockets.sockets.has(socketId)).toBe(false);
     });
 
     it('refuses a user deleted after login, exactly as REST does', async () => {

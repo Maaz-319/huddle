@@ -33,10 +33,7 @@ import { ChatService } from './chat.service';
 import { ChatStateStore, VIOLATION_LIMIT } from './chat-state-store.interface';
 import { PresenceService } from '../presence/presence.service';
 import { SessionMiddleware } from '../auth/session.middleware';
-import {
-  SESSION_REVOKED,
-  USER_SESSIONS_REVOKED,
-} from '../auth/session-events';
+import { SESSION_REVOKED, USER_SESSIONS_REVOKED } from '../auth/session-events';
 import type {
   SessionRevoked,
   UserSessionsRevoked,
@@ -206,23 +203,8 @@ export class ChatGateway implements OnGatewayConnection {
 
       // Engine.IO emits this for real transport ping/pong traffic. The
       // namespace Socket does not receive transport control packets.
-      socket.conn.on('heartbeat', async () => {
-        try {
-          const userId = await this.sessions.activeSessionUserId(
-            socket.data.sessionId,
-          );
-          if (userId !== socket.data.user.id.toString()) {
-            socket.disconnect(true);
-            return;
-          }
-          await this.presence.onHeartbeat(socket.data.user.id, socket.id);
-        } catch (error) {
-          this.logger.warn('ChatGateway', 'Session heartbeat check failed', {
-            error: String(error),
-            userId: socket.data.user.id.toString(),
-          });
-          socket.disconnect(true);
-        }
+      socket.conn.on('heartbeat', () => {
+        void this.checkSessionHeartbeat(socket);
       });
 
       this.logger.debug(
@@ -239,6 +221,27 @@ export class ChatGateway implements OnGatewayConnection {
         `Room subscription failed for user ${socket.data.user.id.toString()}`,
         { error: String(error), userId: socket.data.user.id.toString() },
       );
+      socket.disconnect(true);
+    }
+  }
+
+  private async checkSessionHeartbeat(
+    socket: AuthenticatedSocket,
+  ): Promise<void> {
+    try {
+      const userId = await this.sessions.activeSessionUserId(
+        socket.data.sessionId,
+      );
+      if (userId !== socket.data.user.id.toString()) {
+        socket.disconnect(true);
+        return;
+      }
+      await this.presence.onHeartbeat(socket.data.user.id, socket.id);
+    } catch (error) {
+      this.logger.warn('ChatGateway', 'Session heartbeat check failed', {
+        error: String(error),
+        userId: socket.data.user.id.toString(),
+      });
       socket.disconnect(true);
     }
   }

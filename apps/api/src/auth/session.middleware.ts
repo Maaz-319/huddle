@@ -124,7 +124,11 @@ export class SessionMiddleware implements NestMiddleware {
     return new Promise((resolve, reject) => {
       this.store.get(sessionId, (error, data) => {
         if (error !== null) {
-          reject(error);
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(`Session lookup failed (${typeof error})`),
+          );
           return;
         }
         resolve(data?.userId);

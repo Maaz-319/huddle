@@ -189,7 +189,9 @@ export class RedisPresenceStore extends PresenceStore {
       else stale.push(userId.toString());
     });
 
-    if (stale.length > 0) await this.redis.srem(this.onlineUsersKey(), ...stale);
+    if (stale.length > 0) {
+      await this.redis.srem(this.onlineUsersKey(), ...stale);
+    }
     return online;
   }
 
