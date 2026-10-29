@@ -176,7 +176,7 @@ describe('RedisPresenceStore', () => {
       // Gone — key expired, so hash is empty
       await expect(redis.exists(key)).resolves.toBe(0);
       // Lazy cleanup: getOnlineUserIds removes stale online-users entries
-      await expect(shortStore.getOnlineUserIds()).resolves.not.toContain(user);
+      await expect(shortStore.getOnlineUserIds([user])).resolves.not.toContain(user);
       await expect(
         redis.sismember(ONLINE_USERS_KEY, user.toString()),
       ).resolves.toBe(0);

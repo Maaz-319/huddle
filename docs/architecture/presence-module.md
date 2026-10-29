@@ -60,6 +60,7 @@ Out of scope:
 
 - On client connect (or when opening a server), the client fetches a **one-time snapshot** of current online status for the relevant set of user IDs (e.g., a server's member list).
 - After the snapshot, the client relies on live push updates (§5) to stay current — no polling.
+- `GET /presence/snapshot` requires a signed-in caller and only returns requested IDs for users sharing a server with them (plus the caller). Requests are capped at 1,000 IDs; the Redis lookup checks only those authorized IDs, not the global online set.
 
 ---
 

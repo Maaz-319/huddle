@@ -109,7 +109,7 @@ return remaining
  * without sleeping the real duration.
  *
  * Losing a value — eviction, restart, expiry — yields `0` for connection count,
- * absence from `getOnlineUserIds`, which is the safe direction: at worst one
+ * absence from a requested-user lookup, which is the safe direction: at worst one
  * user appears offline until their next reconnect, exactly the failure mode
  * AGENTS.md section 8 declares acceptable for everything Redis holds here.
  */
@@ -168,21 +168,28 @@ export class RedisPresenceStore extends PresenceStore {
     return len;
   }
 
-  async getOnlineUserIds(): Promise<bigint[]> {
-    const members = await this.redis.smembers(this.onlineUsersKey());
-    const online: bigint[] = [];
+  async getOnlineUserIds(userIds: bigint[]): Promise<bigint[]> {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length === 0) return [];
 
-    for (const member of members) {
-      const userId = BigInt(member);
-      const count = await this.redis.hlen(this.connectionsKey(userId));
-      if (count > 0) {
-        online.push(userId);
-      } else {
-        // Stale entry in online-users set (hash expired) — clean it up
-        await this.redis.srem(this.onlineUsersKey(), member);
-      }
+    const pipeline = this.redis.pipeline();
+    for (const userId of uniqueIds) {
+      pipeline.hlen(this.connectionsKey(userId));
     }
+    const counts = await pipeline.exec();
+    if (counts === null) throw new Error('Redis pipeline returned no results');
 
+    const online: bigint[] = [];
+    const stale: string[] = [];
+    counts.forEach(([error, count], index) => {
+      if (error !== null) throw error;
+      const userId = uniqueIds[index];
+      if (userId === undefined) return;
+      if (typeof count === 'number' && count > 0) online.push(userId);
+      else stale.push(userId.toString());
+    });
+
+    if (stale.length > 0) await this.redis.srem(this.onlineUsersKey(), ...stale);
     return online;
   }
 

@@ -46,6 +46,9 @@ export abstract class MembershipRepository {
   /** Every server this user belongs to. */
   abstract findByUserId(userId: bigint): Promise<Membership[]>;
 
+  /** Distinct user IDs sharing at least one server with this user. */
+  abstract findUserIdsSharingServers(userId: bigint): Promise<bigint[]>;
+
   /** This user's membership in this server, or `null` if they are not one. */
   abstract findByServerAndUser(
     serverId: bigint,

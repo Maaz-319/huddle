@@ -178,7 +178,7 @@ describe('presence broadcast + snapshot (e2e)', () => {
   function connect(cookie: string): Promise<Socket> {
     return new Promise((resolve, reject) => {
       const socket = io(baseUrl, {
-        extraHeaders: { Cookie: cookie },
+        extraHeaders: { Cookie: cookie, Origin: 'http://localhost:5173' },
         reconnection: false,
       });
       socket.once('connect', () => {
@@ -579,8 +579,10 @@ describe('presence broadcast + snapshot (e2e)', () => {
       [ownerId.toString()],
     );
 
-    // Requesting only outsider (not connected) should return empty
+    // A connected user outside the member's servers must remain invisible.
     const outsiderId = await userIdOf(OUTSIDER.githubId);
+    await connect(seeded.outsider.cookie);
+    await waitForPresenceRegistered(outsiderId);
     const snapshotOutsider = await request(app.getHttpServer())
       .get('/presence/snapshot')
       .query({ userIds: outsiderId.toString() })
@@ -590,6 +592,14 @@ describe('presence broadcast + snapshot (e2e)', () => {
     expect((snapshotOutsider.body as PresenceSnapshotResponse).online).toEqual(
       [],
     );
+  });
+
+  it('requires a signed-in user for presence snapshots', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/presence/snapshot')
+      .query({ userIds: '300000000000000001' });
+
+    expect(response.status).toBe(401);
   });
 
   it('global presence: user online in server A appears online to members of server B (no per-server presence)', async () => {

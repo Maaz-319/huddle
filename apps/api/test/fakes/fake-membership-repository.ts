@@ -46,6 +46,18 @@ export class FakeMembershipRepository extends MembershipRepository {
     return Promise.resolve(found.map((membership) => ({ ...membership })));
   }
 
+  findUserIdsSharingServers(userId: bigint): Promise<bigint[]> {
+    const serverIds = new Set(
+      [...this.store.memberships.values()]
+        .filter((membership) => membership.userId === userId)
+        .map((membership) => membership.serverId),
+    );
+    const peers = [...this.store.memberships.values()]
+      .filter((membership) => serverIds.has(membership.serverId))
+      .map((membership) => membership.userId);
+    return Promise.resolve([...new Set([userId, ...peers])]);
+  }
+
   findByServerAndUser(
     serverId: bigint,
     userId: bigint,

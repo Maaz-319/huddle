@@ -148,7 +148,7 @@ export function describePresenceStoreContract(
 
     describe('getOnlineUserIds', () => {
       it('returns empty array when no users are online', async () => {
-        await expect(store.getOnlineUserIds()).resolves.toEqual([]);
+        await expect(store.getOnlineUserIds([])).resolves.toEqual([]);
       });
 
       it('returns only users with ≥1 active connection', async () => {
@@ -160,10 +160,23 @@ export function describePresenceStoreContract(
         await store.addConnection(userB, freshSocket());
         await store.addConnection(userB, freshSocket()); // userB has 2
 
-        await expect(store.getOnlineUserIds()).resolves.toEqual(
-          expect.arrayContaining([userA, userB]),
-        );
-        await expect(store.getOnlineUserIds()).resolves.not.toContain(userC);
+        await expect(
+          store.getOnlineUserIds([userA, userB, userC]),
+        ).resolves.toEqual(expect.arrayContaining([userA, userB]));
+        await expect(
+          store.getOnlineUserIds([userC]),
+        ).resolves.not.toContain(userC);
+      });
+
+      it('checks only the requested users', async () => {
+        const online = freshUser();
+        const unrequested = freshUser();
+        await store.addConnection(online, freshSocket());
+        await store.addConnection(unrequested, freshSocket());
+
+        await expect(store.getOnlineUserIds([online])).resolves.toEqual([
+          online,
+        ]);
       });
 
       it('excludes users whose connections have all expired', async () => {
@@ -171,12 +184,14 @@ export function describePresenceStoreContract(
         const user = freshUser();
 
         await shortStore.addConnection(user, freshSocket());
-        await expect(shortStore.getOnlineUserIds()).resolves.toContain(user);
+        await expect(
+          shortStore.getOnlineUserIds([user]),
+        ).resolves.toContain(user);
 
         await sleep(EXPIRY_HEARTBEAT_MS * 2);
-        await expect(shortStore.getOnlineUserIds()).resolves.not.toContain(
-          user,
-        );
+        await expect(
+          shortStore.getOnlineUserIds([user]),
+        ).resolves.not.toContain(user);
       });
     });
 
@@ -307,7 +322,9 @@ export function describePresenceStoreContract(
 
         await store.removeConnection(user, socket);
         await expect(store.getConnectionCount(user)).resolves.toBe(0);
-        await expect(store.getOnlineUserIds()).resolves.not.toContain(user);
+        await expect(
+          store.getOnlineUserIds([user]),
+        ).resolves.not.toContain(user);
       });
 
       it('dirty disconnect (no removeConnection) detected via getStaleConnections', async () => {
@@ -333,9 +350,9 @@ export function describePresenceStoreContract(
         // After cleaning up stale, user should be offline
         await staleStore.removeConnection(user, socket);
         await expect(staleStore.getConnectionCount(user)).resolves.toBe(0);
-        await expect(staleStore.getOnlineUserIds()).resolves.not.toContain(
-          user,
-        );
+        await expect(
+          staleStore.getOnlineUserIds([user]),
+        ).resolves.not.toContain(user);
       });
     });
   });

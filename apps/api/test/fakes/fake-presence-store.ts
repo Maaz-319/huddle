@@ -74,11 +74,13 @@ export class FakePresenceStore extends PresenceStore {
     return Promise.resolve(count);
   }
 
-  getOnlineUserIds(): Promise<bigint[]> {
+  getOnlineUserIds(userIds: bigint[]): Promise<bigint[]> {
     const now = Date.now();
     const online: bigint[] = [];
 
-    for (const [userId, userConns] of this.connections.entries()) {
+    for (const userId of new Set(userIds)) {
+      const userConns = this.connections.get(userId);
+      if (userConns === undefined) continue;
       let hasActive = false;
       for (const [socketId, lastTouch] of userConns.entries()) {
         if (now - lastTouch < this.heartbeatWindowMs) {

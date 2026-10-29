@@ -89,8 +89,8 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get all currently online user IDs (for initial snapshot).
    */
-  async getOnlineUserIds(): Promise<bigint[]> {
-    return this.store.getOnlineUserIds();
+  async getOnlineUserIds(userIds: bigint[]): Promise<bigint[]> {
+    return this.store.getOnlineUserIds(userIds);
   }
 
   /**
