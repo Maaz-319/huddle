@@ -1,14 +1,15 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useServerStore } from '@/stores/serverStore';
 import { useMembershipStore } from '@/stores/membershipStore';
 import { useChannelStore } from '@/stores/channelStore';
+import { useChannelAccessStore } from '@/access/channelAccess';
 import { useUIStore } from '@/stores/uiStore';
 import { toast } from '@/stores/toastStore';
-import { apiClient, isApiError } from '@/api/client';
-import { forgetChannel, useTranscriptRuntime } from '@/transcript/channelTranscript';
+import { apiClient } from '@/api/client';
+import { useTranscriptRuntime } from '@/transcript/channelTranscript';
 import { ServerList } from './ServerList';
 import { ChannelList } from './ChannelList';
 import { MemberSidebar } from './MemberSidebar';
@@ -72,8 +73,16 @@ export function AppShell() {
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
   const showServerPanels = Boolean(currentServerId || params.serverId);
-  const probingServersRef = useRef<Set<string>>(new Set());
   const membershipUserRef = useRef<string | null>(null);
+  const accessProbeStatuses = useChannelAccessStore((state) => state.probeStatusByServer);
+
+  const navigateForAccess = useCallback((serverId: string | null) => {
+    if (serverId) {
+      void navigate({ to: '/app/$serverId', params: { serverId } });
+    } else {
+      void navigate({ to: '/app' });
+    }
+  }, [navigate]);
 
   // Global error handler
   useGlobalErrorHandler();
@@ -89,6 +98,7 @@ export function AppShell() {
   useEffect(() => {
     if (membershipUserRef.current !== user?.id) {
       useMembershipStore.getState().clear();
+      useChannelAccessStore.getState().clear();
       membershipUserRef.current = user?.id ?? null;
     }
     if (user) {
@@ -143,9 +153,8 @@ export function AppShell() {
       useAuthStore.getState().logout();
     });
 
-    const channelStore = useChannelStore.getState();
     const cleanupChannelAdded = on('channel_added', ({ channelId }) => {
-      channelStore.onChannelAdded(channelId);
+      void useChannelAccessStore.getState().handleChannelAdded(channelId);
     });
     const cleanupMembership = on('membership_changed', ({ serverId }) => {
       if (useServerStore.getState().servers.some((server) => server.id === serverId)) {
@@ -153,47 +162,7 @@ export function AppShell() {
       }
     });
     const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
-      forgetChannel(channelId);
-      if (params.channelId === channelId && params.serverId) {
-        navigate({ to: `/app/${params.serverId}` });
-      }
-      const emptiedServerId = (() => {
-        for (const [sid, channels] of useChannelStore.getState().channelsByServer.entries()) {
-          if (channels.some((c) => c.id === channelId)) {
-            return channels.length === 1 ? sid : null;
-          }
-        }
-        return null;
-      })();
-
-      channelStore.onChannelRemoved(channelId);
-
-      if (!emptiedServerId || probingServersRef.current.has(emptiedServerId)) return;
-      probingServersRef.current.add(emptiedServerId);
-
-      void (async () => {
-        try {
-          await apiClient.get(`/servers/${emptiedServerId}`);
-        } catch (error) {
-          if (
-            isApiError(error) &&
-            (error.status === 404 || error.status === 403)
-          ) {
-            const wasActive =
-              useServerStore.getState().currentServerId === emptiedServerId;
-            useServerStore.getState().removeServer(emptiedServerId);
-            if (wasActive) {
-              toast.error(
-                'Server unavailable',
-                'You no longer have access to this server.',
-              );
-              navigate({ to: '/app' });
-            }
-          }
-        } finally {
-          probingServersRef.current.delete(emptiedServerId);
-        }
-      })();
+      useChannelAccessStore.getState().handleChannelRemoved(channelId, navigateForAccess);
     });
 
     return () => {
@@ -202,7 +171,7 @@ export function AppShell() {
       cleanupMembership();
       cleanupChannelRemoved();
     };
-  }, [socket, on, navigate, params.channelId, params.serverId]);
+  }, [socket, on, navigateForAccess]);
 
   // Redirect to first server if on /app with no server selected
   useEffect(() => {
@@ -296,6 +265,36 @@ export function AppShell() {
 
         {/* Message pane / settings — center, flex-1 */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {Object.entries(accessProbeStatuses).map(([serverId, status]) => {
+            const serverName = servers.find((server) => server.id === serverId)?.name ?? 'server';
+            return (
+              <div
+                key={serverId}
+                className="flex shrink-0 items-center justify-between gap-3 border-b border-accent-warn/40 bg-accent-warn/10 px-4 py-2 text-sm text-accent-warn"
+                role="alert"
+              >
+                <span>
+                  {status === 'checking'
+                    ? `Checking access to ${serverName}…`
+                    : `Could not verify access to ${serverName}. It remains in your server list.`}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={status === 'checking'}
+                  onClick={() => {
+                    void useChannelAccessStore.getState().retryServerProbe(
+                      serverId,
+                      navigateForAccess,
+                    );
+                  }}
+                >
+                  {status === 'checking' ? 'Checking…' : 'Retry'}
+                </Button>
+              </div>
+            );
+          })}
           <ErrorBoundary
             fallback={<FeatureErrorFallback title="Messages" description="Failed to load messages" onRetry={() => params.channelId && apiClient.get(`/channels/${params.channelId}/messages`)} />}
             resetKeys={[params.channelId]}
