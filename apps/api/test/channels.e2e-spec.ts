@@ -201,6 +201,7 @@ describe('POST/GET /servers/:serverId/channels (e2e)', () => {
         serverId,
         name: 'general',
         isPrivate: false,
+        myCapabilities: ['view', 'post', 'delete_others', 'manage_settings'],
       });
       // Snowflakes leave as strings in both directions (AGENTS.md section 4).
       expect(typeof idOf(response.body)).toBe('string');
@@ -377,6 +378,10 @@ describe('POST/GET /servers/:serverId/channels (e2e)', () => {
 
       expect(response.status).toBe(200);
       expect(namesOf(response.body).sort()).toEqual(['general', 'random']);
+      expect(response.body).toMatchObject([
+        { myCapabilities: ['view', 'post'] },
+        { myCapabilities: ['view', 'post'] },
+      ]);
     });
 
     it('hides a private channel from a member who is not in it', async () => {

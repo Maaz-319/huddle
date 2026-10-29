@@ -54,6 +54,18 @@ export interface CreateServerRequest {
   iconUrl: string | null;
 }
 
+export interface ChannelView {
+  channel: Channel;
+  myCapabilities: Capability[];
+}
+
+const CHANNEL_CAPABILITIES = [
+  'view',
+  'post',
+  'delete_others',
+  'manage_settings',
+] as const satisfies readonly Capability[];
+
 /**
  * Server/membership/invite orchestration, depending only on the ports
  * (AGENTS.md section 2) — no Prisma types belong in this file.
@@ -490,6 +502,19 @@ export class AdministrationService {
    * asserts the count does not grow with the number of channels.
    */
   async listChannels(serverId: bigint, callerId: bigint): Promise<Channel[]> {
+    const views = await this.listChannelViews(serverId, callerId);
+    return views.map(({ channel }) => channel);
+  }
+
+  /**
+   * The channels this caller may see, paired with their effective
+   * capabilities. The bulk membership and override reads are shared across
+   * the whole server; resolving each capability is an in-memory pass.
+   */
+  async listChannelViews(
+    serverId: bigint,
+    callerId: bigint,
+  ): Promise<ChannelView[]> {
     const channels = await this.channels.findByServerId(serverId);
 
     const membership = await this.memberships.findByServerAndUser(
@@ -505,7 +530,12 @@ export class AdministrationService {
       });
     }
 
-    if (membership.role === 'owner') return channels;
+    if (membership.role === 'owner') {
+      return channels.map((channel) => ({
+        channel,
+        myCapabilities: [...DEFAULT_CAPABILITIES.owner],
+      }));
+    }
 
     const channelIds = channels.map((channel) => channel.id);
 
@@ -526,17 +556,58 @@ export class AdministrationService {
       }
     }
 
-    return channels.filter(
-      (channel) =>
-        resolveCapability(
-          {
-            role: membership.role,
-            isPrivate: channel.isPrivate,
-            isChannelMember: memberOf.has(channel.id),
-            overrides: byChannel.get(channel.id) ?? [],
-          },
-          'view',
-        ).allowed,
+    return channels.flatMap((channel): ChannelView[] => {
+      const context = {
+        role: membership.role,
+        isPrivate: channel.isPrivate,
+        isChannelMember: memberOf.has(channel.id),
+        overrides: byChannel.get(channel.id) ?? [],
+      };
+      const myCapabilities = CHANNEL_CAPABILITIES.filter(
+        (capability) => resolveCapability(context, capability).allowed,
+      );
+
+      // A view refusal stays indistinguishable from a channel that does not
+      // exist: do not include its name or any other permission information.
+      return myCapabilities.includes('view')
+        ? [{ channel, myCapabilities }]
+        : [];
+    });
+  }
+
+  /** Effective capabilities for a channel already loaded by its controller. */
+  async getChannelCapabilities(
+    channel: Channel,
+    callerId: bigint,
+  ): Promise<Capability[]> {
+    const membership = await this.memberships.findByServerAndUser(
+      channel.serverId,
+      callerId,
+    );
+
+    if (membership === null) {
+      throw new ForbiddenError('Not a member of this server', {
+        serverId: channel.serverId.toString(),
+      });
+    }
+
+    if (membership.role === 'owner') return [...DEFAULT_CAPABILITIES.owner];
+
+    const [isChannelMember, overrides] = await Promise.all([
+      channel.isPrivate
+        ? this.channelMembers.isMember(channel.id, callerId)
+        : Promise.resolve(false),
+      this.channelOverrides.findByChannelId(channel.id),
+    ]);
+    const context = {
+      role: membership.role,
+      isPrivate: channel.isPrivate,
+      isChannelMember,
+      overrides,
+    };
+
+    return CHANNEL_CAPABILITIES.filter(
+      (capability) => resolveCapability(context, capability).allowed,
     );
   }
 

@@ -7,7 +7,7 @@ import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useTyping } from '@/hooks/useMessages';
 import { useChannelTranscript } from '@/transcript/channelTranscript';
-import { useMyRole } from '@/hooks/useMyRole';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { Button } from '@/components/ui/button';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
@@ -41,8 +41,9 @@ export function MessagePane() {
   } = useChannelTranscript(currentChannelId);
 
   const { startTyping, stopTyping, typingUsernames } = useTyping(currentChannelId);
-  const myRole = useMyRole(params.serverId ?? null);
-  const canDeleteOthers = myRole === 'owner' || myRole === 'moderator';
+  const permissions = useMyPermissions(params.serverId ?? null, currentChannelId);
+  const canPost = permissions.can('post');
+  const canDeleteOthers = canPost && permissions.can('delete_others');
 
   // Real channel/server identity for the header
   const channel = currentChannelId
@@ -163,6 +164,7 @@ export function MessagePane() {
             <MessageList
               messages={messages}
               isOwn={isOwn}
+              canPost={canPost}
               canDeleteOthers={canDeleteOthers}
               onEdit={handleEdit}
               onDelete={handleDelete}
@@ -197,13 +199,15 @@ export function MessagePane() {
       </div>
 
       {/* Composer */}
-      <Composer
-        onSend={handleSend}
-        onTypingStart={startTyping}
-        onTypingStop={stopTyping}
-        disabled={!currentChannelId}
-        placeholder={`Message #${channel?.name ?? 'channel'}`}
-      />
+      {canPost && (
+        <Composer
+          onSend={handleSend}
+          onTypingStart={startTyping}
+          onTypingStop={stopTyping}
+          disabled={!currentChannelId}
+          placeholder={`Message #${channel?.name ?? 'channel'}`}
+        />
+      )}
     </div>
   );
 }

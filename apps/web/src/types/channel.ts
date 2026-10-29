@@ -1,9 +1,12 @@
+export type Capability = 'view' | 'post' | 'delete_others' | 'manage_settings';
+
 export interface ChannelResponse {
   id: string;
   serverId: string;
   name: string;
   isPrivate: boolean;
   createdAt: string;
+  myCapabilities: Capability[];
 }
 
 export interface ChannelOverrideResponse {

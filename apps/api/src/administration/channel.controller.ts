@@ -11,6 +11,7 @@ import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import type { Channel } from './channel-repository.interface';
 import { CreateChannelDto } from './create-channel.dto';
+import type { Capability } from './channel-override-repository.interface';
 
 /** The shape every channel route returns — a `Channel`, ids serialised per AGENTS.md section 4. */
 export interface ChannelResponse {
@@ -19,6 +20,7 @@ export interface ChannelResponse {
   name: string;
   isPrivate: boolean;
   createdAt: string;
+  myCapabilities: Capability[];
 }
 
 /**
@@ -26,13 +28,17 @@ export interface ChannelResponse {
  * `ChannelDetailController` returns the same shape from `/channels/:channelId`
  * and two copies of a response shape is how they drift.
  */
-export function toChannelResponse(channel: Channel): ChannelResponse {
+export function toChannelResponse(
+  channel: Channel,
+  myCapabilities: Capability[],
+): ChannelResponse {
   return {
     id: channel.id.toString(),
     serverId: channel.serverId.toString(),
     name: channel.name,
     isPrivate: channel.isPrivate,
     createdAt: channel.createdAt.toISOString(),
+    myCapabilities,
   };
 }
 
@@ -72,7 +78,10 @@ export class ChannelController {
       user.id,
     );
 
-    return toChannelResponse(channel);
+    return toChannelResponse(
+      channel,
+      await this.administration.getChannelCapabilities(channel, user.id),
+    );
   }
 
   /**
@@ -95,8 +104,13 @@ export class ChannelController {
     @Param('serverId', ParseSnowflakePipe) serverId: bigint,
     @CurrentUser() user: User,
   ): Promise<ChannelResponse[]> {
-    const channels = await this.administration.listChannels(serverId, user.id);
+    const channels = await this.administration.listChannelViews(
+      serverId,
+      user.id,
+    );
 
-    return channels.map(toChannelResponse);
+    return channels.map(({ channel, myCapabilities }) =>
+      toChannelResponse(channel, myCapabilities),
+    );
   }
 }

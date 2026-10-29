@@ -209,7 +209,25 @@ describe('GET /channels/:channelId (e2e)', () => {
       id: publicId,
       name: 'general',
       isPrivate: false,
+      myCapabilities: ['view', 'post'],
     });
+  });
+
+  it('returns the caller’s effective capabilities without exposing other roles', async () => {
+    const { publicId, member } = await seed();
+    await prisma.channelOverride.create({
+      data: {
+        channelId: BigInt(publicId),
+        role: 'member',
+        capability: 'post',
+      },
+    });
+
+    const response = await member.get(`/channels/${publicId}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ myCapabilities: ['view'] });
+    expect(response.body).not.toHaveProperty('overrides');
   });
 
   it('returns a private channel to the owner, who holds no ChannelMember row', async () => {

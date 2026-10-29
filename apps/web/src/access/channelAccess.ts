@@ -106,6 +106,7 @@ export const useChannelAccessStore = create<ChannelAccessState>(() => ({
 
   handleChannelAdded: async (channelId) => {
     const token = nextChannelEventGeneration(channelId);
+    const permissionUserId = useAuthStore.getState().user?.id ?? null;
     let channel: ChannelResponse;
     try {
       channel = await apiClient.get<ChannelResponse>(`/channels/${channelId}`);
@@ -113,15 +114,28 @@ export const useChannelAccessStore = create<ChannelAccessState>(() => ({
       console.error('Failed to apply channel_added:', error);
       return;
     }
-    if (channelEventGenerations.get(channelId) !== token) return;
+    if (
+      channelEventGenerations.get(channelId) !== token ||
+      useAuthStore.getState().user?.id !== permissionUserId
+    ) return;
 
     useChannelStore.setState((state) => {
-      const channelsByServer = new Map(state.channelsByServer);
+      const sameUser = state.permissionUserId === permissionUserId;
+      const channelsByServer = sameUser
+        ? new Map(state.channelsByServer)
+        : new Map<string, ChannelResponse[]>();
       const channels = channelsByServer.get(channel.serverId) ?? [];
-      if (!channels.some((candidate) => candidate.id === channel.id)) {
-        channelsByServer.set(channel.serverId, [...channels, channel]);
-      }
-      return { channelsByServer };
+      channelsByServer.set(
+        channel.serverId,
+        channels.some((candidate) => candidate.id === channel.id)
+          ? channels.map((candidate) => candidate.id === channel.id ? channel : candidate)
+          : [...channels, channel],
+      );
+      const verifiedChannelIds = sameUser
+        ? new Set(state.verifiedChannelIds)
+        : new Set<string>();
+      verifiedChannelIds.add(channel.id);
+      return { channelsByServer, verifiedChannelIds, permissionUserId };
     });
     invalidateProbe(channel.serverId);
     setProbeStatus(channel.serverId, null);
@@ -144,6 +158,8 @@ export const useChannelAccessStore = create<ChannelAccessState>(() => ({
     forgetChannel(channelId);
     useChannelStore.setState((state) => {
       const channelsByServer = new Map(state.channelsByServer);
+      const verifiedChannelIds = new Set(state.verifiedChannelIds);
+      verifiedChannelIds.delete(channelId);
       for (const [candidateServerId, channels] of channelsByServer) {
         if (channels.some((channel) => channel.id === channelId)) {
           channelsByServer.set(
@@ -154,6 +170,7 @@ export const useChannelAccessStore = create<ChannelAccessState>(() => ({
       }
       return {
         channelsByServer,
+        verifiedChannelIds,
         currentChannelId: state.currentChannelId === channelId ? null : state.currentChannelId,
       };
     });

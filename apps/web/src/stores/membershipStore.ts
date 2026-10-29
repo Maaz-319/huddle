@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { authApi } from '@/api/auth';
 import { apiClient } from '@/api/client';
+import { useAuthStore } from '@/stores/authStore';
 import type { ServerMemberResponse } from '@/types/channel';
 
 export type MemberView = ServerMemberResponse & {
@@ -19,6 +20,7 @@ type MembershipEntry = {
 
 interface MembershipStore {
   byServer: Record<string, MembershipEntry>;
+  userId: string | null;
   refresh: (serverId: string) => Promise<void>;
   invalidate: (serverId: string) => void;
   remove: (serverId: string) => void;
@@ -31,7 +33,17 @@ const versions = new Map<string, number>();
 
 export const useMembershipStore = create<MembershipStore>((set, get) => ({
   byServer: {},
+  userId: null,
   refresh: (serverId) => {
+    const userId = useAuthStore.getState().user?.id ?? null;
+    if (userId === null) return Promise.resolve();
+    if (get().userId !== userId) {
+      for (const currentServerId of Object.keys(get().byServer)) {
+        versions.set(currentServerId, (versions.get(currentServerId) ?? 0) + 1);
+      }
+      pending.clear();
+      set({ byServer: {}, userId });
+    }
     const existing = pending.get(serverId);
     if (existing) return existing;
     const version = versions.get(serverId) ?? 0;
@@ -78,6 +90,6 @@ export const useMembershipStore = create<MembershipStore>((set, get) => ({
   clear: () => {
     for (const serverId of Object.keys(get().byServer)) versions.set(serverId, (versions.get(serverId) ?? 0) + 1);
     pending.clear();
-    set({ byServer: {} });
+    set({ byServer: {}, userId: null });
   },
 }));
