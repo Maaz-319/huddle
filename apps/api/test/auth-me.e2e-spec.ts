@@ -105,6 +105,47 @@ describe('GET/PATCH /auth/me (e2e)', () => {
     });
   });
 
+  it('does not include email in the bulk public profile lookup', async () => {
+    const agent = await loggedInAgent(app);
+    const userId = (
+      await prisma.user.findUniqueOrThrow({
+        where: { githubId: String(GITHUB_USER_ID) },
+        select: { id: true },
+      })
+    ).id.toString();
+    const response = await agent.get('/auth/users').query({ ids: userId });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([
+      {
+        id: userId,
+        username: GITHUB_LOGIN,
+        avatarUrl: 'https://avatars.example.com/2',
+        bio: null,
+      },
+    ]);
+  });
+
+  it('rotates the session ID after a successful OAuth callback', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const initial = await agent.get('/auth/github');
+    const [beforeCookie] = initial.headers['set-cookie'] ?? [];
+    if (beforeCookie === undefined) {
+      throw new Error('OAuth state set no cookie');
+    }
+
+    stubGithubExchange();
+    const callback = await agent.get(
+      `/auth/github/callback?code=test-code&state=${extractState(initial.headers.location)}`,
+    );
+    const [afterCookie] = callback.headers['set-cookie'] ?? [];
+    if (afterCookie === undefined) {
+      throw new Error('Login set no session cookie');
+    }
+
+    expect(afterCookie.split(';')[0]).not.toBe(beforeCookie.split(';')[0]);
+  });
+
   it('updates the bio and a follow-up GET reflects it', async () => {
     const agent = await loggedInAgent(app);
 

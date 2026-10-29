@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
 import { isSnowflakeString } from './snowflake.service';
 
+export const MAX_SNOWFLAKE_ARRAY_LENGTH = 1_000;
+
 /**
  * Parses a comma-separated list of Snowflake ID strings into `bigint[]`.
  *
@@ -21,6 +23,12 @@ export class ParseSnowflakeArrayPipe implements PipeTransform<
     }
 
     const parts = value.split(',').map((part) => part.trim());
+
+    if (parts.length > MAX_SNOWFLAKE_ARRAY_LENGTH) {
+      throw new BadRequestException(
+        `Expected at most ${MAX_SNOWFLAKE_ARRAY_LENGTH} IDs`,
+      );
+    }
 
     if (parts.some((part) => part === '')) {
       throw new BadRequestException('Empty ID in comma-separated list');

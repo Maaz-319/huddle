@@ -60,12 +60,10 @@ export abstract class PresenceStore {
   abstract getConnectionCount(userId: bigint): Promise<number>;
 
   /**
-   * All users with ≥1 active connection (for initial presence snapshot).
-   *
-   * Used when a client connects to fetch the current online set for
-   * their relevant peer group (e.g., a server's member list).
+   * The requested users who have ≥1 active connection, for an initial
+   * presence snapshot. Implementations must not scan unrelated users.
    */
-  abstract getOnlineUserIds(): Promise<bigint[]>;
+  abstract getOnlineUserIds(userIds: bigint[]): Promise<bigint[]>;
 
   /**
    * Heartbeat touch — called on each socket.io pong.

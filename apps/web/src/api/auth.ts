@@ -1,5 +1,5 @@
 import { API_BASE } from './apiBase';
-import type { MeResponse } from '@/types/user'
+import type { MeResponse, UserSummaryResponse } from '@/types/user'
 
 
 async function fetchWithAuth<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -41,9 +41,9 @@ export const authApi = {
     await fetchWithAuth<void>('/auth/me', { method: 'DELETE' })
   },
 
-  async getUsers(ids: string[]): Promise<MeResponse[]> {
+  async getUsers(ids: string[]): Promise<UserSummaryResponse[]> {
     const params = new URLSearchParams()
     params.set('ids', ids.join(','))
-    return fetchWithAuth<MeResponse[]>(`/auth/users?${params.toString()}`)
+    return fetchWithAuth<UserSummaryResponse[]>(`/auth/users?${params.toString()}`)
   },
 }

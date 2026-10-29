@@ -189,7 +189,7 @@ describe('the administration Prisma adapters', () => {
     // Channel.serverId is a real foreign key and the contract's servers are
     // seated via createWithOwner, so the owner row has to exist first.
     await prisma.user.create({ data: userFixture(CHANNEL_OWNER_ID) });
-    return { channels, servers };
+    return { channels, channelMembers, servers };
   });
 
   describeChannelMemberRepositoryContract(

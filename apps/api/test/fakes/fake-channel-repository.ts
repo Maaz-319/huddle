@@ -5,7 +5,10 @@ import {
   UpdateChannelInput,
 } from '../../src/administration/channel-repository.interface';
 import { ConflictError, NotFoundError } from '../../src/common/errors';
-import { FakeAdministrationStore } from './fake-administration-store';
+import {
+  channelMemberKey,
+  FakeAdministrationStore,
+} from './fake-administration-store';
 
 /** Snowflake-shaped, i.e. too large for a JS number, so ids look real. */
 const FIRST_ID = 700000000000000001n;
@@ -38,6 +41,20 @@ export class FakeChannelRepository extends ChannelRepository {
     this.store.channels.set(channel.id, channel);
 
     return Promise.resolve({ ...channel });
+  }
+
+  async createPrivate(
+    input: Omit<CreateChannelInput, 'isPrivate'>,
+    creatorId: bigint,
+  ): Promise<Channel> {
+    const channel = await this.create({ ...input, isPrivate: true });
+    const key = channelMemberKey(channel.id, creatorId);
+    this.store.channelMembers.set(key, {
+      channelId: channel.id,
+      userId: creatorId,
+      addedAt: new Date(),
+    });
+    return channel;
   }
 
   findById(id: bigint): Promise<Channel | null> {

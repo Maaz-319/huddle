@@ -1,4 +1,5 @@
 import { ChannelRepository } from '../../src/administration/channel-repository.interface';
+import { ChannelMemberRepository } from '../../src/administration/channel-member-repository.interface';
 import {
   CreateServerInput,
   ServerRepository,
@@ -38,6 +39,7 @@ const NO_SUCH_SERVER = 999000000000000004n;
  */
 export interface ChannelRepositoryFixture {
   channels: ChannelRepository;
+  channelMembers: ChannelMemberRepository;
   servers: ServerRepository;
 }
 
@@ -55,10 +57,11 @@ export function describeChannelRepositoryContract(
 ): void {
   describe(`ChannelRepository contract (${label})`, () => {
     let channels: ChannelRepository;
+    let channelMembers: ChannelMemberRepository;
     let servers: ServerRepository;
 
     beforeEach(async () => {
-      ({ channels, servers } = await createRepositories());
+      ({ channels, channelMembers, servers } = await createRepositories());
     });
 
     /** A server to hang channels off, with its owner already seated. */
@@ -147,6 +150,19 @@ export function describeChannelRepositoryContract(
 
         expect(channel.isPrivate).toBe(true);
       });
+    });
+
+    it('creates a private channel and seats its creator atomically', async () => {
+      const serverId = await seedServer();
+      const channel = await channels.createPrivate(
+        { serverId, name: 'mods' },
+        CHANNEL_OWNER_ID,
+      );
+
+      expect(channel.isPrivate).toBe(true);
+      await expect(
+        channelMembers.isMember(channel.id, CHANNEL_OWNER_ID),
+      ).resolves.toBe(true);
     });
 
     describe('findById', () => {

@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, Length } from 'class-validator';
+import { IsOptional, IsString, IsUrl, Length } from 'class-validator';
 
 /**
  * No doc specifies a length limit for `Server.name` — confirmed with the
@@ -20,5 +20,6 @@ export class CreateServerDto {
 
   @IsOptional()
   @IsString()
+  @IsUrl({ protocols: ['https'], require_protocol: true })
   iconUrl?: string;
 }

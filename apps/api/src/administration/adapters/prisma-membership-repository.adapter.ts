@@ -48,6 +48,21 @@ export class PrismaMembershipRepository extends MembershipRepository {
     return rows.map(toMembership);
   }
 
+  async findUserIdsSharingServers(userId: bigint): Promise<bigint[]> {
+    const memberships = await this.prisma.membership.findMany({
+      where: { userId },
+      select: { serverId: true },
+    });
+    if (memberships.length === 0) return [userId];
+
+    const peers = await this.prisma.membership.findMany({
+      where: { serverId: { in: memberships.map(({ serverId }) => serverId) } },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    return [...new Set([userId, ...peers.map(({ userId: id }) => id)])];
+  }
+
   async findByServerAndUser(
     serverId: bigint,
     userId: bigint,

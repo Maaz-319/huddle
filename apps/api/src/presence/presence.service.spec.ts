@@ -210,7 +210,7 @@ describe('PresenceService', () => {
 
   describe('getOnlineUserIds', () => {
     it('returns empty array when no users online', async () => {
-      const online = await service.getOnlineUserIds();
+      const online = await service.getOnlineUserIds([USER_ID]);
       expect(online).toEqual([]);
     });
 
@@ -218,7 +218,7 @@ describe('PresenceService', () => {
       await service.onConnect(USER_ID, 'socket-1');
       await service.onConnect(OTHER_USER_ID, 'socket-2');
 
-      const online = await service.getOnlineUserIds();
+      const online = await service.getOnlineUserIds([USER_ID, OTHER_USER_ID]);
       expect(online.sort()).toEqual([USER_ID, OTHER_USER_ID].sort());
     });
 
@@ -230,7 +230,7 @@ describe('PresenceService', () => {
       await new Promise((r) => setTimeout(r, 150));
       await service.sweepStaleConnections();
 
-      const online = await service.getOnlineUserIds();
+      const online = await service.getOnlineUserIds([USER_ID, OTHER_USER_ID]);
       expect(online).toEqual([]);
     });
   });

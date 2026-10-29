@@ -826,7 +826,7 @@ describe('AdministrationService', () => {
   });
 
   describe('createChannel', () => {
-    it('creates a channel without seating anyone in it', async () => {
+    it('lets an owner create a private channel without a membership row', async () => {
       const { server } = await servers.createWithOwner(
         {
           name: 'Huddle HQ',
@@ -842,9 +842,7 @@ describe('AdministrationService', () => {
         OWNER_ID,
       );
 
-      // The creator gets no ChannelMember row -- they reach the channel
-      // through their server role, and membership is managed by its own
-      // routes.
+      // Owners bypass private-channel membership by design.
       await expect(channelMembers.findByChannelId(channel.id)).resolves.toEqual(
         [],
       );
@@ -886,6 +884,9 @@ describe('AdministrationService', () => {
       );
 
       expect(channel.isPrivate).toBe(true);
+      await expect(
+        channelMembers.isMember(channel.id, OTHER_USER_ID),
+      ).resolves.toBe(true);
     });
 
     it('makes no membership read at all for a public channel', async () => {

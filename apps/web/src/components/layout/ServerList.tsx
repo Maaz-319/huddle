@@ -21,6 +21,7 @@ import { InviteDialog } from '@/components/servers/InviteDialog';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { getInitials, getColorFromString } from '@/utils/avatar';
+import { safeServerIconUrl } from '@/utils/serverIcon';
 import type { ServerResponse } from '@/types/server';
 
 type Server = ServerResponse;
@@ -161,6 +162,7 @@ export function ServerList() {
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-1" role="navigation" aria-label="Servers">
         {servers.map((server) => {
           const isActive = currentServerId === server.id;
+          const iconUrl = safeServerIconUrl(server.iconUrl);
           return (
             <div key={server.id} className="group relative">
               {/* Active-server pill — the Discord-style left bar */}
@@ -187,9 +189,10 @@ export function ServerList() {
                     onClick={() => closeAllDrawers()}
                     {...serverMenu.triggerProps(server)}
                   >
-                    {server.iconUrl ? (
+                    {iconUrl ? (
                       <img
-                        src={server.iconUrl}
+                        src={iconUrl}
+                        referrerPolicy="no-referrer"
                         alt=""
                         className="h-8 w-8 rounded-lg object-cover"
                       />

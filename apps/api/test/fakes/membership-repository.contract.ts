@@ -83,6 +83,45 @@ export function describeMembershipRepositoryContract(
       });
     });
 
+    describe('findUserIdsSharingServers', () => {
+      it('returns the caller and distinct members of shared servers only', async () => {
+        await memberships.create(MEMBER);
+        await memberships.create({
+          serverId: SERVER_ID,
+          userId: OTHER_USER_ID,
+          role: 'member',
+        });
+        await memberships.create({
+          serverId: OTHER_SERVER_ID,
+          userId: OTHER_USER_ID,
+          role: 'member',
+        });
+
+        await expect(
+          memberships.findUserIdsSharingServers(USER_ID),
+        ).resolves.toEqual([USER_ID, OTHER_USER_ID]);
+      });
+
+      it('does not return members of servers the caller does not share', async () => {
+        await memberships.create(MEMBER);
+        await memberships.create({
+          serverId: OTHER_SERVER_ID,
+          userId: OTHER_USER_ID,
+          role: 'member',
+        });
+
+        await expect(
+          memberships.findUserIdsSharingServers(USER_ID),
+        ).resolves.toEqual([USER_ID]);
+      });
+
+      it('returns only the caller when they belong to no servers', async () => {
+        await expect(
+          memberships.findUserIdsSharingServers(USER_ID),
+        ).resolves.toEqual([USER_ID]);
+      });
+    });
+
     describe('findByServerAndUser', () => {
       it('finds the membership', async () => {
         const created = await memberships.create(MEMBER);

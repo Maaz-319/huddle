@@ -4,6 +4,7 @@ import connectRedis from 'connect-redis';
 import type { IncomingMessage } from 'http';
 import { NextFunction, Request, Response } from 'express';
 import session from 'express-session';
+import type { Store } from 'express-session';
 import { EnvironmentVariables, NodeEnv } from '../common/env.validation';
 import { RedisService } from '../common/redis.service';
 
@@ -37,13 +38,15 @@ export class SessionMiddleware implements NestMiddleware {
     res: Response,
     next: NextFunction,
   ) => void;
+  private readonly store: Store;
 
   constructor(
     config: ConfigService<EnvironmentVariables, true>,
     redis: RedisService,
   ) {
+    this.store = new RedisStore({ client: redis, prefix: 'huddle:sess:' });
     this.handler = session({
-      store: new RedisStore({ client: redis, prefix: 'huddle:sess:' }),
+      store: this.store,
       secret: config.get('SESSION_SECRET', { infer: true }),
       resave: false,
       saveUninitialized: false,
@@ -86,7 +89,9 @@ export class SessionMiddleware implements NestMiddleware {
    *   response and issues no cookie back. If express-session ever starts
    *   reading the response during setup, this method must grow with it.
    */
-  async handshakeUserId(req: IncomingMessage): Promise<string | undefined> {
+  async handshakeSession(
+    req: IncomingMessage,
+  ): Promise<{ userId: string | undefined; sessionId: string }> {
     const expressReq = req as unknown as Request;
     const res = {
       getHeader: () => undefined,
@@ -108,6 +113,26 @@ export class SessionMiddleware implements NestMiddleware {
 
     // The handler set `session` before calling next without an error; a
     // rejected promise above means it never got that far.
-    return expressReq.session.userId;
+    return {
+      userId: expressReq.session.userId,
+      sessionId: expressReq.sessionID,
+    };
+  }
+
+  /** Returns the user for a still-live Redis session, or undefined if absent. */
+  async activeSessionUserId(sessionId: string): Promise<string | undefined> {
+    return new Promise((resolve, reject) => {
+      this.store.get(sessionId, (error, data) => {
+        if (error !== null) {
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(`Session lookup failed (${typeof error})`),
+          );
+          return;
+        }
+        resolve(data?.userId);
+      });
+    });
   }
 }

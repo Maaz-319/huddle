@@ -44,6 +44,7 @@ Out of scope (this doc): permission *enforcement* (checking a resolved role/capa
 - **Rename / delete:** owner and moderators, by default — subject to being tightened per channel via the "manage-channel-settings" override (§4).
 - **Visibility:** a channel can be toggled **private/invite-only**; private channels are **fully hidden** from non-members (do not appear in their channel list at all).
 - **Who may make a channel private:** the Owner and Moderators only, per PRD §5 — a question separate from the creation policy above. Under an `everyone` policy an ordinary Member may create channels, and is still refused if the request asks for a private one. Toggling an existing channel needs manage-channel-settings, which a Member never holds, so the same rule falls out of the guard there.
+- **Private-channel creator access:** when a Moderator creates a private channel, the creation transaction also seats them in it so the channel does not become hidden from its creator. The Owner needs no seat because owner authority bypasses channel membership.
 - **Flipping private → public keeps the channel's member list.** The `ChannelMember` rows go inert while the channel is public — nothing reads them — and mean the same thing again if it is flipped back. Deleting them on the flip would destroy the list on a misclick with nothing to rebuild it from.
 
 ---

@@ -36,10 +36,17 @@ describe('server membership view', () => {
     });
   });
 
-  it('hides role verification during refresh and keeps rows with an error on failure', async () => {
+  it('keeps the last verified view during refresh, then hides it on failure', async () => {
     await useMembershipStore.getState().refresh(serverId);
-    calls.get.mockRejectedValueOnce(new Error('offline'));
-    await useMembershipStore.getState().refresh(serverId);
+    let rejectRefresh: (error: Error) => void = () => {};
+    calls.get.mockImplementationOnce(() => new Promise<ServerMemberResponse[]>((_, reject) => { rejectRefresh = reject; }));
+    const refresh = useMembershipStore.getState().refresh(serverId);
+    expect(useMembershipStore.getState().byServer[serverId]).toMatchObject({
+      loading: true,
+      verified: true,
+    });
+    rejectRefresh(new Error('offline'));
+    await refresh;
     expect(useMembershipStore.getState().byServer[serverId]).toMatchObject({
       verified: false, error: 'offline', members: [{ username: 'Ada' }],
     });
@@ -84,7 +91,7 @@ describe('server membership view', () => {
           name: 'general',
           isPrivate: false,
           createdAt: '2026-01-01T00:00:00.000Z',
-          myCapabilities: ['view'],
+          myCapabilities: ['view', 'manage_settings'],
         }]]]),
         verifiedChannelIds: new Set([channelId]),
         permissionUserId: userId,
@@ -93,8 +100,20 @@ describe('server membership view', () => {
 
     expect(result.current.confirmed).toBe(true);
     expect(result.current.can('view')).toBe(true);
+    expect(result.current.can('manage_settings')).toBe(true);
     expect(result.current.can('post')).toBe(false);
     expect(result.current.hasRole('owner')).toBe(false);
+
+    let resolveRefresh: (value: ServerMemberResponse[]) => void = () => {};
+    calls.get.mockImplementationOnce(() => new Promise<ServerMemberResponse[]>((resolve) => { resolveRefresh = resolve; }));
+    let pendingRefresh: Promise<void> = Promise.resolve();
+    act(() => { pendingRefresh = useMembershipStore.getState().refresh(serverId); });
+    expect(result.current.can('manage_settings')).toBe(true);
+    await act(async () => {
+      resolveRefresh([row]);
+      await pendingRefresh;
+    });
+    expect(result.current.can('manage_settings')).toBe(true);
 
     act(() => useAuthStore.setState({ user: { ...profile, id: '900000000000000004' } }));
     expect(result.current.confirmed).toBe(false);
