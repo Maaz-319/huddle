@@ -4,10 +4,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/components/ui/cn';
 import { Search, X, Settings } from 'lucide-react';
 import { useServerStore } from '@/stores/serverStore';
-import { useChannelStore } from '@/stores/channelStore';
+import { useMembershipStore } from '@/stores/membershipStore';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { useAuthStore } from '@/stores/authStore';
-import { authApi } from '@/api/auth';
 import { apiClient } from '@/api/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -15,14 +14,8 @@ import { PopoverRoot, PopoverTrigger } from '@/components/ui/popover';
 import { MemberProfileCard } from './MemberProfileCard';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 
-interface Member {
-  id: string;
-  username: string;
-  avatarUrl: string | null;
-  bio: string | null;
-  role: 'owner' | 'moderator' | 'member';
-  joinedAt: string;
-}
+import type { MemberView as Member } from '@/stores/membershipStore';
+const EMPTY_MEMBERS: Member[] = [];
 
 function getRoleBadge(role: Member['role']) {
   switch (role) {
@@ -125,81 +118,29 @@ function UserCard() {
 
 export function MemberSidebar() {
   const { currentServerId } = useServerStore();
-  const { listServerMembers } = useChannelStore();
+  const entry = useMembershipStore((state) => currentServerId ? state.byServer[currentServerId] : undefined);
+  const refresh = useMembershipStore((state) => state.refresh);
   const setSnapshot = usePresenceStore((s) => s.setSnapshot);
   const onlineUserIds = usePresenceStore((s) => s.onlineUserIds);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [loading, setLoading] = useState(true);
+  const members = entry?.members ?? EMPTY_MEMBERS;
+  const loading = !entry || (entry.loading && members.length === 0 && !entry.error);
   const [searchQuery, setSearchQuery] = useState('');
   const parentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!currentServerId) {
-      setMembers([]);
-      setLoading(false);
-      return;
-    }
+    if (currentServerId) void refresh(currentServerId);
+  }, [currentServerId, refresh]);
 
-    let mounted = true;
-
-    async function loadMembers() {
-      try {
-        setLoading(true);
-        const serverMembers = await listServerMembers(currentServerId!);
-        const userIds = serverMembers.map((m) => m.userId);
-        const users = await authApi.getUsers(userIds);
-
-        const userMap = new Map(users.map((u) => [u.id, u]));
-
-        const enrichedMembers: Member[] = serverMembers.map((m) => {
-          const user = userMap.get(m.userId);
-          return {
-            id: m.userId,
-            username: user?.username ?? 'Unknown User',
-            avatarUrl: user?.avatarUrl ?? null,
-            bio: user?.bio ?? null,
-            role: m.role,
-            joinedAt: m.joinedAt,
-          };
-        });
-
-        if (mounted) {
-          setMembers(enrichedMembers);
-          // Snapshot only the subset that is actually online — seeding the
-          // set with every member id would render everyone green.
-          if (userIds.length > 0) {
-            try {
-              const snapshot = await apiClient.get<{ online: string[] }>(
-                `/presence/snapshot?userIds=${userIds.join(',')}`
-              );
-              if (mounted) setSnapshot(snapshot.online);
-            } catch (presenceError) {
-              // Presence is cosmetic; the member list still stands.
-              console.error('Failed to load presence snapshot:', presenceError);
-              if (mounted) setSnapshot([]);
-            }
-          } else {
-            setSnapshot([]);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load members:', error);
-        if (mounted) {
-          setMembers([]);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadMembers();
-
-    return () => {
-      mounted = false;
-    };
-  }, [currentServerId, listServerMembers, setSnapshot]);
+  useEffect(() => {
+    if (!currentServerId) return;
+    let active = true;
+    const userIds = members.map((member) => member.id);
+    if (userIds.length === 0) { setSnapshot([]); return; }
+    void apiClient.get<{ online: string[] }>(`/presence/snapshot?userIds=${userIds.join(',')}`)
+      .then((snapshot) => { if (active) setSnapshot(snapshot.online); })
+      .catch(() => { if (active) setSnapshot([]); });
+    return () => { active = false; };
+  }, [currentServerId, members, setSnapshot]);
 
   // Filter members based on search query
   const filteredMembers = useMemo(() => {
@@ -295,6 +236,11 @@ export function MemberSidebar() {
       </div>
 
       {/* Member list */}
+      {entry?.error && (
+        <div role="alert" className="mx-3 mt-2 rounded-lg bg-accent-warn/10 p-2 text-xs text-accent-warn">
+          Could not refresh members. <button type="button" className="underline" onClick={() => currentServerId && void refresh(currentServerId)}>Retry</button>
+        </div>
+      )}
       <nav
         ref={parentRef}
         className="flex-1 min-h-0 overflow-y-auto px-2 py-2"

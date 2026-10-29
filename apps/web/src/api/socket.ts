@@ -97,7 +97,7 @@ function setupSocketListeners(socket: Socket): void {
   const serverEvents: ServerEventType[] = [
     'message_create', 'message_update', 'message_delete',
     'typing', 'presence_online', 'presence_offline',
-    'channel_added', 'channel_removed', 'policy_violation'
+    'channel_added', 'channel_removed', 'membership_changed', 'policy_violation'
   ];
 
   for (const event of serverEvents) {

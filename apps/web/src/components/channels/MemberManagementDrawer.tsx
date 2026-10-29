@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/stores/toastStore';
 import { useChannelStore } from '@/stores/channelStore';
-import { authApi } from '@/api/auth';
-import type { ChannelMemberResponse, ServerMemberResponse } from '@/types/channel';
-import type { MeResponse } from '@/types/user';
+import { useMembershipStore } from '@/stores/membershipStore';
+import type { ChannelMemberResponse } from '@/types/channel';
+import type { MemberView } from '@/stores/membershipStore';
 
 function getInitials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -22,10 +22,8 @@ function getColorFromString(str: string): string {
   return `hsl(${hue}, 70%, 45%)`;
 }
 
-type ServerMemberRow = ServerMemberResponse & {
-  username: string;
-  avatarUrl: string | null;
-};
+type ServerMemberRow = MemberView;
+const EMPTY_SERVER_MEMBERS: ServerMemberRow[] = [];
 
 type ChannelMemberRow = ChannelMemberResponse & {
   username: string;
@@ -41,10 +39,21 @@ interface MemberManagementDrawerProps {
 }
 
 export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId }: MemberManagementDrawerProps) {
-  const { listChannelMembers, addChannelMember, removeChannelMember, listServerMembers } = useChannelStore();
+  const { listChannelMembers, addChannelMember, removeChannelMember } = useChannelStore();
+  const serverEntry = useMembershipStore((state) => state.byServer[serverId]);
+  const refreshServerMembers = useMembershipStore((state) => state.refresh);
 
-  const [channelMembers, setChannelMembers] = useState<ChannelMemberRow[]>([]);
-  const [serverMembers, setServerMembers] = useState<ServerMemberRow[]>([]);
+  const [channelRows, setChannelRows] = useState<ChannelMemberResponse[]>([]);
+  const serverMembers: ServerMemberRow[] = serverEntry?.members ?? EMPTY_SERVER_MEMBERS;
+  const channelMembers: ChannelMemberRow[] = useMemo(() => {
+    const serverByUser = new Map(serverMembers.map((row) => [row.userId, row]));
+    return channelRows.map((row) => ({
+      ...row,
+      username: serverByUser.get(row.userId)?.username ?? 'Unknown user',
+      avatarUrl: serverByUser.get(row.userId)?.avatarUrl ?? null,
+      role: serverByUser.get(row.userId)?.role ?? 'member',
+    }));
+  }, [channelRows, serverMembers]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
@@ -53,32 +62,17 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [channelRows, serverRows] = await Promise.all([
+      const [rows] = await Promise.all([
         listChannelMembers(channelId),
-        listServerMembers(serverId),
+        refreshServerMembers(serverId),
       ]);
-      const userIds = [...new Set([...channelRows.map((m) => m.userId), ...serverRows.map((m) => m.userId)])];
-      const users: MeResponse[] = userIds.length > 0 ? await authApi.getUsers(userIds) : [];
-      const userMap = new Map(users.map((u) => [u.id, u]));
-      const roleByUser = new Map(serverRows.map((m) => [m.userId, m.role]));
-
-      setChannelMembers(channelRows.map((m) => ({
-        ...m,
-        username: userMap.get(m.userId)?.username ?? 'Unknown user',
-        avatarUrl: userMap.get(m.userId)?.avatarUrl ?? null,
-        role: roleByUser.get(m.userId) ?? 'member',
-      })));
-      setServerMembers(serverRows.map((m) => ({
-        ...m,
-        username: userMap.get(m.userId)?.username ?? 'Unknown user',
-        avatarUrl: userMap.get(m.userId)?.avatarUrl ?? null,
-      })));
+      setChannelRows(rows);
     } catch (error) {
       toast.error('Failed to load members', error instanceof Error ? error.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, [channelId, serverId, listChannelMembers, listServerMembers]);
+  }, [channelId, serverId, listChannelMembers, refreshServerMembers]);
 
   useEffect(() => {
     if (open) {
@@ -141,6 +135,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {serverEntry?.error && <div role="alert" className="mb-3 text-sm text-accent-warn">Could not refresh server members. <button type="button" className="underline" onClick={() => void refreshServerMembers(serverId)}>Retry</button></div>}
           {/* Current Members */}
           <div className="mb-6">
             <h3 className="text-text-muted text-xs font-semibold uppercase tracking-wider mb-3">

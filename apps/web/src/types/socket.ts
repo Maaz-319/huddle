@@ -54,6 +54,10 @@ export interface ChannelRemoved {
   channelId: string;
 }
 
+export interface MembershipChanged {
+  serverId: string;
+}
+
 export interface PolicyViolation {
   error: {
     code: 'TOO_MANY_VIOLATIONS';
@@ -115,6 +119,7 @@ export type ServerEvent =
   | { type: 'presence_offline'; payload: PresenceOffline }
   | { type: 'channel_added'; payload: ChannelAdded }
   | { type: 'channel_removed'; payload: ChannelRemoved }
+  | { type: 'membership_changed'; payload: MembershipChanged }
   | { type: 'policy_violation'; payload: PolicyViolation };
 
 export type ClientEvent =
@@ -136,6 +141,7 @@ export type ServerEventMap = {
   presence_offline: PresenceOffline;
   channel_added: ChannelAdded;
   channel_removed: ChannelRemoved;
+  membership_changed: MembershipChanged;
   policy_violation: PolicyViolation;
 };
 

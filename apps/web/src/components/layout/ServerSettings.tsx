@@ -4,9 +4,8 @@ import {
   ArrowLeft, Trash2, ShieldCheck, Users, Link2, Lock, Settings2, UserCog,
 } from 'lucide-react';
 import { useServerStore } from '@/stores/serverStore';
-import { useChannelStore } from '@/stores/channelStore';
+import { useMembershipStore } from '@/stores/membershipStore';
 import { useAuthStore } from '@/stores/authStore';
-import { authApi } from '@/api/auth';
 import { toast } from '@/stores/toastStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,15 +19,11 @@ import {
 import { InvitePanel } from '@/components/servers/InvitePanel';
 import { cn } from '@/components/ui/cn';
 import type { ServerResponse } from '@/types/server';
-import type { ServerMemberResponse } from '@/types/channel';
-import type { MeResponse } from '@/types/user';
+import type { MemberView } from '@/stores/membershipStore';
 
 type Section = 'overview' | 'members' | 'invites' | 'privacy' | 'danger';
 
-type MemberRow = ServerMemberResponse & {
-  username: string;
-  avatarUrl: string | null;
-};
+type MemberRow = MemberView;
 
 const POLICY_OPTIONS: Array<{ value: ServerResponse['channelCreationPolicy']; label: string; description: string }> = [
   { value: 'owner_only', label: 'Only you', description: 'Just the server owner can create channels' },
@@ -54,11 +49,12 @@ export function ServerSettings() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const { servers, fetchServers, updateServer, deleteServer, updateMemberRole, transferOwnership } = useServerStore();
-  const { listServerMembers } = useChannelStore();
+  const entry = useMembershipStore((state) => state.byServer[serverId]);
+  const refreshMembers = useMembershipStore((state) => state.refresh);
 
   const [section, setSection] = useState<Section>('overview');
-  const [members, setMembers] = useState<MemberRow[]>([]);
-  const [membersLoading, setMembersLoading] = useState(true);
+  const members: MemberRow[] = entry?.members ?? [];
+  const membersLoading = !entry || (entry.loading && members.length === 0);
 
   const [name, setName] = useState('');
   const [iconUrl, setIconUrl] = useState('');
@@ -78,30 +74,13 @@ export function ServerSettings() {
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const myRole = useMemo(
-    () => members.find((m) => m.userId === user?.id)?.role ?? null,
-    [members, user?.id],
-  );
+  const myRole = entry?.verified ? members.find((m) => m.userId === user?.id)?.role ?? null : null;
   const isOwner = myRole === 'owner';
 
   const loadMembers = useCallback(async () => {
     if (!serverId) return;
-    setMembersLoading(true);
-    try {
-      const serverMembers = await listServerMembers(serverId);
-      const users: MeResponse[] = await authApi.getUsers(serverMembers.map((m) => m.userId));
-      const userMap = new Map(users.map((u) => [u.id, u]));
-      setMembers(serverMembers.map((m) => ({
-        ...m,
-        username: userMap.get(m.userId)?.username ?? 'Unknown user',
-        avatarUrl: userMap.get(m.userId)?.avatarUrl ?? null,
-      })));
-    } catch (error) {
-      toast.error('Failed to load members', error instanceof Error ? error.message : 'Unknown error');
-    } finally {
-      setMembersLoading(false);
-    }
-  }, [serverId, listServerMembers]);
+    await refreshMembers(serverId);
+  }, [serverId, refreshMembers]);
 
   useEffect(() => {
     if (servers.length === 0) {
@@ -110,7 +89,6 @@ export function ServerSettings() {
   }, [servers.length, fetchServers]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadMembers();
   }, [loadMembers]);
 
@@ -322,6 +300,7 @@ export function ServerSettings() {
                 </div>
               ) : (
                 <div className="space-y-1">
+                  {entry?.error && <div role="alert" className="mb-3 text-sm text-accent-warn">Could not refresh members. <button type="button" className="underline" onClick={() => void loadMembers()}>Retry</button></div>}
                   {members.map((member) => (
                     <div key={member.userId} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-bg-raised">
                       {member.avatarUrl ? (
@@ -381,7 +360,7 @@ export function ServerSettings() {
                     <div className="flex-1">
                       <h2 className="text-sm font-medium text-text-primary">Transfer ownership</h2>
                       <p className="text-xs text-text-muted mt-1">
-                        Hands the server to another member. You become a moderator. This is immediate.
+                        Hands the server to another member. You become a member. This is immediate.
                       </p>
                       <Button
                         variant="secondary"
@@ -485,7 +464,7 @@ export function ServerSettings() {
             <DialogTitle>Transfer ownership</DialogTitle>
             <DialogDescription>
               {transferTarget
-                ? `Type "${transferTarget.username}" to confirm. They become the owner; you become a moderator.`
+                ? `Type "${transferTarget.username}" to confirm. They become the owner; you become a member.`
                 : 'Choose the member who should become the new owner.'}
             </DialogDescription>
           </DialogHeader>

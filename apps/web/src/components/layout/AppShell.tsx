@@ -3,6 +3,7 @@ import { useNavigate, useParams, Outlet } from '@tanstack/react-router';
 import { useAuthStore } from '@/stores/authStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useServerStore } from '@/stores/serverStore';
+import { useMembershipStore } from '@/stores/membershipStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { toast } from '@/stores/toastStore';
@@ -72,6 +73,7 @@ export function AppShell() {
   const params = useParams({ strict: false }) as { serverId?: string; channelId?: string };
   const showServerPanels = Boolean(currentServerId || params.serverId);
   const probingServersRef = useRef<Set<string>>(new Set());
+  const membershipUserRef = useRef<string | null>(null);
 
   // Global error handler
   useGlobalErrorHandler();
@@ -85,10 +87,32 @@ export function AppShell() {
 
   // Fetch servers on auth
   useEffect(() => {
+    if (membershipUserRef.current !== user?.id) {
+      useMembershipStore.getState().clear();
+      membershipUserRef.current = user?.id ?? null;
+    }
     if (user) {
       fetchServers();
     }
   }, [user, fetchServers]);
+
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      const serverId = useServerStore.getState().currentServerId;
+      if (serverId) useMembershipStore.getState().invalidate(serverId);
+    };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [user]);
+
+  useEffect(() => {
+    if (status !== 'connected') return;
+    for (const serverId of Object.keys(useMembershipStore.getState().byServer)) {
+      useMembershipStore.getState().invalidate(serverId);
+    }
+  }, [status]);
 
   // Sync route params into stores — the route is the source of truth
   useEffect(() => {
@@ -122,6 +146,11 @@ export function AppShell() {
     const channelStore = useChannelStore.getState();
     const cleanupChannelAdded = on('channel_added', ({ channelId }) => {
       channelStore.onChannelAdded(channelId);
+    });
+    const cleanupMembership = on('membership_changed', ({ serverId }) => {
+      if (useServerStore.getState().servers.some((server) => server.id === serverId)) {
+        useMembershipStore.getState().invalidate(serverId);
+      }
     });
     const cleanupChannelRemoved = on('channel_removed', ({ channelId }) => {
       forgetChannel(channelId);
@@ -170,6 +199,7 @@ export function AppShell() {
     return () => {
       cleanupViolation();
       cleanupChannelAdded();
+      cleanupMembership();
       cleanupChannelRemoved();
     };
   }, [socket, on, navigate, params.channelId, params.serverId]);
@@ -302,7 +332,7 @@ export function AppShell() {
           style={isMobile && isMemberSidebarOpen ? drawerClip : undefined}
         >
           <ErrorBoundary
-            fallback={<FeatureErrorFallback title="Members" description="Failed to load members" onRetry={() => currentServerId && useChannelStore.getState().listServerMembers(currentServerId)} />}
+            fallback={<FeatureErrorFallback title="Members" description="Failed to load members" onRetry={() => currentServerId && useMembershipStore.getState().refresh(currentServerId)} />}
             resetKeys={[currentServerId]}
           >
             <MemberSidebar />
