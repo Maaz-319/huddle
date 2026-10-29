@@ -13,7 +13,7 @@
     "test:e2e": "npm run test:e2e -w @huddle/api",
     "lint": "npm run lint -w @huddle/api",
     "lint:ci": "npm run lint:ci -w @huddle/api",
-    "typecheck": "tsc -p apps/api/tsconfig.json --noEmit && tsc -p apps/api/test/tsconfig.json --noEmit",
+    "typecheck": "npm run build -w @huddle/contracts && tsc -p apps/api/tsconfig.json --noEmit && tsc -p apps/api/test/tsconfig.json --noEmit && npm run typecheck -w @huddle/web",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d",
@@ -22,7 +22,8 @@
     "db:studio": "npm run db:studio -w @huddle/api"
   },
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "engines": {
     "node": ">=22"

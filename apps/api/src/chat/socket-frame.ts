@@ -2,6 +2,8 @@ import { plainToInstance, type ClassConstructor } from 'class-transformer';
 import { validate } from 'class-validator';
 import { DomainError, RateLimitedError } from '../common/errors';
 import { validationExceptionFactory } from '../common/validation-exception.factory';
+import { SERVER_SOCKET_EVENT, type AckError } from '@huddle/contracts';
+export type { AckError, AckFailure, PolicyViolation } from '@huddle/contracts';
 
 /**
  * How long an idempotency key may be. The doc calls it a nonce (a UUID is 36
@@ -11,37 +13,6 @@ import { validationExceptionFactory } from '../common/validation-exception.facto
  * sane generator.
  */
 export const IDEMPOTENCY_KEY_MAX = 128;
-
-/**
- * The machine-readable failure every frame's error ack carries — the thing
- * a client's auto-retry keys off.
- */
-export interface AckError {
-  code: string;
-
-  /**
-   * Whether the client may retry the same frame as-is. `true` only for
-   * budget refusals — retrying a forbidden mutation or an invalid body would
-   * fail identically forever, which is exactly the auto-retry loop
-   * `chat-service.md` section 4 says this flag exists to stop.
-   */
-  retryable: boolean;
-}
-
-/**
- * The failure half of any frame's ack: an error, and the key it echoes so
- * the client can match the reply to the operation it sent.
- */
-export interface AckFailure {
-  /**
-   * Echoed so the client can match the reply to the bubble it sent. Absent
-   * only when the frame was too malformed to name one (no key, or a
-   * non-string key) — there is nothing honest to echo in that case, and the
-   * client knows which key it sent anyway.
-   */
-  idempotencyKey?: string;
-  error: AckError;
-}
 
 /**
  * The server→client notice that closes an escalating connection (#70,
@@ -55,18 +26,7 @@ export interface AckFailure {
  * disconnected for hammering" from "the network died" — a distinction the
  * close frame itself cannot make.
  */
-export const POLICY_VIOLATION_EVENT = 'policy_violation';
-
-/**
- * What the notice carries: the same `error` shape every failure ack uses,
- * so a client's existing error handling reads it without a second pathway.
- * No `idempotencyKey` — see `POLICY_VIOLATION_EVENT`. The code is
- * `TOO_MANY_VIOLATIONS`, `retryable: false`: retrying the same frame as-is
- * is exactly the behaviour that earned the disconnect.
- */
-export interface PolicyViolation {
-  error: AckError;
-}
+export const POLICY_VIOLATION_EVENT = SERVER_SOCKET_EVENT.POLICY_VIOLATION;
 
 /**
  * The `idempotencyKey` to echo on a failure, read off the raw payload —

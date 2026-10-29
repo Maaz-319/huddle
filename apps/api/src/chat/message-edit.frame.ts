@@ -4,7 +4,8 @@ import {
   TransformSnowflake,
 } from '../common/is-snowflake.decorator';
 import { SendMessageDto } from './send-message.dto';
-import { AckFailure, IDEMPOTENCY_KEY_MAX, parseFrame } from './socket-frame';
+import { IDEMPOTENCY_KEY_MAX, parseFrame } from './socket-frame';
+export type { EditAck, EditAckSuccess } from '@huddle/contracts';
 
 /**
  * The client → server `message_edit` frame (#66): which channel, which
@@ -28,20 +29,7 @@ export class MessageEditFrameDto extends SendMessageDto {
   idempotencyKey!: string;
 }
 
-/**
- * Success: the client swaps its pending edit for the real thing — the id it
- * already knew, plus the stamp that renders the "(edited)" marker. Nullable
- * for the same reason `MessageResponse.editedAt` is, so every event a client
- * sees tells one consistent story about the field.
- */
-export interface EditAckSuccess {
-  idempotencyKey: string;
-  messageId: string;
-  editedAt: string | null;
-}
-
 /** The direct reply to the sender, exactly as `message_send` acks. */
-export type EditAck = EditAckSuccess | AckFailure;
 
 /** Validates a raw `message_edit` payload — see `parseFrame` for the why. */
 export function parseMessageEditFrame(

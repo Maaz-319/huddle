@@ -12,16 +12,9 @@ import { AdministrationService } from './administration.service';
 import type { Channel } from './channel-repository.interface';
 import { CreateChannelDto } from './create-channel.dto';
 import type { Capability } from './channel-override-repository.interface';
+import type { ChannelResponse } from '@huddle/contracts';
 
-/** The shape every channel route returns — a `Channel`, ids serialised per AGENTS.md section 4. */
-export interface ChannelResponse {
-  id: string;
-  serverId: string;
-  name: string;
-  isPrivate: boolean;
-  createdAt: string;
-  myCapabilities: Capability[];
-}
+export type { ChannelResponse } from '@huddle/contracts';
 
 /**
  * Exported, unlike the mappers on the other controllers, because

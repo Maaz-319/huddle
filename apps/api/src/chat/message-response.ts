@@ -1,5 +1,6 @@
 import type { SnowflakeService } from '../common/snowflake.service';
 import type { MessageWithAuthor } from './chat.service';
+import type { MessageResponse } from '@huddle/contracts';
 
 /**
  * The shape every message route and every `message_create` /
@@ -15,22 +16,12 @@ import type { MessageWithAuthor } from './chat.service';
  * message is still returned — history renders a "message deleted" placeholder
  * in its place (PRD FR-18/FR-19) — but its text never is.
  */
-export interface MessageAuthorResponse {
-  id: string;
-  username: string;
-  avatarUrl: string;
-}
-
-export interface MessageResponse {
-  id: string;
-  channelId: string;
-  authorId: string;
-  author: MessageAuthorResponse;
-  content: string | null;
-  createdAt: string;
-  editedAt: string | null;
-  isDeleted: boolean;
-}
+export type {
+  MessageAuthorResponse,
+  MessageDeleteResponse,
+  MessagePageResponse,
+  MessageResponse,
+} from '@huddle/contracts';
 
 /**
  * Lives in its own file rather than on `MessageController` because two
@@ -75,13 +66,3 @@ export function toMessageResponse(
  * here for the same reason it is nulled above: the row is blanked at delete
  * time (#63), and this payload is built after that write, never before.
  */
-export interface MessageDeleteResponse {
-  id: string;
-  channelId: string;
-}
-
-/** One page of history, as the history route returns it. */
-export interface MessagePageResponse {
-  messages: MessageResponse[];
-  hasMore: boolean;
-}

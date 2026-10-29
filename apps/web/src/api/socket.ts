@@ -1,12 +1,26 @@
+import { API_BASE } from './apiBase';
+import {
+  SERVER_SOCKET_EVENT,
+  type PresenceOffline,
+  type PresenceOnline,
+} from '@huddle/contracts';
 import { io, Socket } from 'socket.io-client';
 import { useSocketStore } from '@/stores/socketStore';
 import { usePresenceStore } from '@/stores/presenceStore';
 import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/api/auth';
 import { crypto } from '@/utils/crypto';
-import type { SocketStatus, ServerEventMap, ServerEventType, ClientEventType, ClientEventMap, AckResponseMap, ConnectErrorCode } from '@/types/socket';
+import type {
+  AckResponseMap,
+  AckWireResponseMap,
+  ClientEventMap,
+  ClientEventType,
+  ConnectErrorCode,
+  ServerEventMap,
+  ServerEventType,
+  SocketStatus,
+} from '@/types/socket';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
@@ -53,7 +67,7 @@ function settlePendingAcks(error: Error): void {
 }
 
 function createSocket(): Socket {
-  const socket = io(API_URL, {
+  const socket = io(API_BASE, {
     auth: {},
     transports: ['websocket', 'polling'],
     withCredentials: true,
@@ -169,11 +183,7 @@ function setupSocketListeners(socket: Socket): void {
 
   socket.on('connect_error', handleConnectError);
 
-  const serverEvents: ServerEventType[] = [
-    'message_create', 'message_update', 'message_delete',
-    'typing', 'presence_online', 'presence_offline',
-    'channel_added', 'channel_removed', 'membership_changed', 'policy_violation',
-  ];
+  const serverEvents: ServerEventType[] = Object.values(SERVER_SOCKET_EVENT);
 
   for (const event of serverEvents) {
     socket.on(event, (payload: unknown) => {
@@ -184,10 +194,10 @@ function setupSocketListeners(socket: Socket): void {
     });
   }
 
-  socket.on('presence_online', (payload: { userId: string }) => {
+  socket.on(SERVER_SOCKET_EVENT.PRESENCE_ONLINE, (payload: PresenceOnline) => {
     usePresenceStore.getState().setOnline(payload.userId);
   });
-  socket.on('presence_offline', (payload: { userId: string }) => {
+  socket.on(SERVER_SOCKET_EVENT.PRESENCE_OFFLINE, (payload: PresenceOffline) => {
     usePresenceStore.getState().setOffline(payload.userId);
   });
 }
@@ -241,7 +251,7 @@ export function emitWithAck<K extends ClientEventType>(
       timeout,
     });
 
-    socket.emit(event, payload, (response: AckResponseMap[K]) => {
+    socket.emit(event, payload, (response: AckWireResponseMap[K]) => {
       const pending = pendingAcks.get(ackKey);
       if (!pending) return;
       clearTimeout(pending.timeout);

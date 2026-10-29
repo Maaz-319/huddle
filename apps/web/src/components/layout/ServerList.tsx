@@ -21,15 +21,9 @@ import { InviteDialog } from '@/components/servers/InviteDialog';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { getInitials, getColorFromString } from '@/utils/avatar';
+import type { ServerResponse } from '@/types/server';
 
-interface Server {
-  id: string;
-  name: string;
-  iconUrl: string | null;
-  channelCreationPolicy: 'owner_only' | 'everyone' | 'mods_only';
-  memberInviteToggle: boolean;
-  createdAt: string;
-}
+type Server = ServerResponse;
 
 export function ServerList() {
   const { servers, currentServerId, createServer, deleteServer } = useServerStore();

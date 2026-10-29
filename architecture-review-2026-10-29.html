@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Huddle · Architecture review · 29 Oct 2026</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+  </script>
+  <style>
+    :root { color-scheme: light; }
+    html { scroll-behavior: smooth; }
+    body { background: #f5f4ef; color: #1b2927; }
+    .paper { background: #fffefa; box-shadow: 0 16px 50px #203b3610; }
+    .diagram { min-height: 310px; background: #fafaf7; }
+    .module { border: 1px solid #a9bbb4; border-radius: 12px; background: #fffefa; }
+    .module-dark { background: #163a35; color: #f7faf8; border-color: #163a35; }
+    .seam { border-top: 2px dashed #6c978a; }
+    .micro { font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    .arrow { color: #b4534c; font-weight: 800; }
+    .mermaid { display: flex; align-items: center; justify-content: center; min-height: 265px; }
+    .mermaid svg { max-width: 100%; max-height: 285px; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body class="antialiased">
+  <main class="mx-auto max-w-6xl px-4 py-10 sm:px-8 sm:py-16">
+    <header class="mb-12 border-b border-emerald-950/20 pb-9">
+      <div class="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[.18em] text-emerald-800">
+        <span>Huddle / Architecture field notes</span><span>29 October 2026</span>
+      </div>
+      <h1 class="mt-5 max-w-4xl font-serif text-4xl leading-tight sm:text-6xl">Deepen the modules around the channel transcript.</h1>
+      <div class="mt-7 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600">
+        <span><span class="mr-2 inline-block h-3 w-3 rounded-sm border border-emerald-900 bg-white align-middle"></span>module</span>
+        <span><span class="mr-2 inline-block w-5 border-t-2 border-dashed border-emerald-700 align-middle"></span>seam</span>
+        <span><span class="mr-2 font-bold text-red-700">→</span>leakage</span>
+        <span><span class="mr-2 inline-block h-3 w-3 rounded-sm bg-emerald-950 align-middle"></span>deep module</span>
+      </div>
+    </header>
+
+    <section id="candidates" class="space-y-12">
+      <article id="membership" class="paper overflow-hidden rounded-2xl border border-emerald-950/10">
+        <div class="border-b border-emerald-950/10 px-6 py-6 sm:px-8">
+          <div class="flex flex-wrap items-center gap-2"><span class="micro text-emerald-800">01 / Membership</span><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">Strong</span><span class="rounded-full bg-stone-100 px-3 py-1 text-xs text-slate-600">in-process</span></div>
+          <h2 class="mt-3 font-serif text-3xl">One server membership view</h2>
+          <p class="mt-2 text-sm text-slate-600">Server members, user profiles, and the current user’s role are assembled in four places.</p>
+        </div>
+        <div class="grid lg:grid-cols-2">
+          <div class="border-b border-emerald-950/10 p-5 lg:border-b-0 lg:border-r sm:p-7">
+            <div class="micro mb-4 text-red-700">Before / repeated assembly</div>
+            <div class="diagram flex flex-col justify-center gap-2 rounded-xl border border-stone-200 p-4">
+              <div class="grid grid-cols-2 gap-2 text-center text-xs">
+                <div class="module p-3">Member sidebar<br><span class="text-slate-500">members + profiles + presence</span></div>
+                <div class="module p-3">Server settings<br><span class="text-slate-500">members + profiles</span></div>
+                <div class="module p-3">Channel members<br><span class="text-slate-500">members + profiles</span></div>
+                <div class="module p-3">My role hook<br><span class="text-slate-500">members → cached role</span></div>
+              </div>
+              <div class="text-center text-lg arrow">↓ &nbsp; ↓ &nbsp; ↓ &nbsp; ↓</div>
+              <div class="seam pt-2 text-center text-xs text-emerald-800">membership + user lookups repeated across the seam</div>
+              <div class="module mx-auto w-4/5 p-3 text-center text-xs">HTTP adapters / server membership and user records</div>
+            </div>
+          </div>
+          <div class="p-5 sm:p-7">
+            <div class="micro mb-4 text-emerald-800">After / one deep module</div>
+            <div class="diagram flex flex-col justify-center gap-4 rounded-xl border border-stone-200 p-4">
+              <div class="grid grid-cols-4 gap-1 text-center text-[11px] text-slate-600"><div>Sidebar</div><div>Settings</div><div>Channel members</div><div>My role</div></div>
+              <div class="seam pt-2 text-center text-xs text-emerald-800">one membership interface for callers and tests</div>
+              <div class="module module-dark mx-auto w-full p-6 text-center"><div class="micro text-emerald-200">Deep module</div><div class="mt-2 font-serif text-xl">Server membership view</div><div class="mt-2 text-xs text-emerald-100">fetch · enrich · refresh · role state</div></div>
+              <div class="text-center text-xs text-slate-500">Presence remains an ephemeral view beside durable membership.</div>
+            </div>
+          </div>
+        </div>
+        <div class="grid gap-5 border-t border-emerald-950/10 px-6 py-6 text-sm sm:grid-cols-[1.4fr_1fr] sm:px-8">
+          <div><div class="micro text-slate-500">Files</div><p class="mt-2 font-mono text-xs leading-6">MemberSidebar.tsx · ServerSettings.tsx · MemberManagementDrawer.tsx · useMyRole.ts · channelStore.ts · serverStore.ts</p><p class="mt-3"><strong>Problem.</strong> A shallow member-list interface leaves enrichment and role freshness with callers.</p><p class="mt-2"><strong>Solution.</strong> Put membership assembly and refresh behind one module seam; keep presence separate.</p></div>
+          <div><div class="micro text-slate-500">Wins / test surface</div><ul class="mt-2 list-disc space-y-1 pl-5"><li>Locality: one enrichment rule</li><li>Leverage: four callers, one interface</li><li>Tests cover role refresh</li></ul><p class="mt-3 text-xs text-slate-600"><strong>Decision to settle:</strong> when role and profile data refresh, especially after ownership transfer.</p></div>
+        </div>
+      </article>
+
+      <article id="access" class="paper overflow-hidden rounded-2xl border border-emerald-950/10">
+        <div class="border-b border-emerald-950/10 px-6 py-6 sm:px-8"><div class="flex flex-wrap items-center gap-2"><span class="micro text-emerald-800">02 / Realtime access</span><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">Strong</span><span class="rounded-full bg-stone-100 px-3 py-1 text-xs text-slate-600">in-process</span></div><h2 class="mt-3 font-serif text-3xl">Reconcile channel access in one place</h2><p class="mt-2 text-sm text-slate-600">A channel access event currently changes navigation, visible channels, and the channel transcript through separate paths.</p></div>
+        <div class="grid lg:grid-cols-2">
+          <div class="border-b border-emerald-950/10 p-5 lg:border-b-0 lg:border-r sm:p-7"><div class="micro mb-4 text-red-700">Before / scattered transition</div><div class="diagram rounded-xl border border-stone-200 p-3"><pre class="mermaid">flowchart TB
+  E["channel_added / channel_removed"] --> A["App shell"]
+  A --> R["Route navigation"]
+  A --> T["Forget channel transcript"]
+  A --> P["Probe server access"]
+  A --> C["Channel state"]
+  C --> F["Fetch added channel"]
+  P --> S["Server state"]
+  classDef leak stroke:#b4534c,stroke-width:2px,fill:#fff4f1;
+  class A,C,P leak;</pre></div></div>
+          <div class="p-5 sm:p-7"><div class="micro mb-4 text-emerald-800">After / one transition seam</div><div class="diagram rounded-xl border border-stone-200 p-3"><pre class="mermaid">flowchart TB
+  E["Channel access event"] --> M["Channel access reconciliation"]
+  M --> C["Visible channel state"]
+  M --> T["Channel transcript"]
+  M --> R["Active route"]
+  M --> S["Server access check"]
+  classDef deep fill:#163a35,color:#ffffff,stroke:#163a35,stroke-width:3px;
+  class M deep;</pre></div></div>
+        </div>
+        <div class="grid gap-5 border-t border-emerald-950/10 px-6 py-6 text-sm sm:grid-cols-[1.4fr_1fr] sm:px-8"><div><div class="micro text-slate-500">Files</div><p class="mt-2 font-mono text-xs leading-6">AppShell.tsx · channelStore.ts · serverStore.ts · transcript/channelTranscript.ts</p><p class="mt-3"><strong>Problem.</strong> The app shell knows the ordering between four modules and a server probe.</p><p class="mt-2"><strong>Solution.</strong> Deepen a channel access module around the whole client transition.</p></div><div><div class="micro text-slate-500">Wins / test surface</div><ul class="mt-2 list-disc space-y-1 pl-5"><li>Locality: one access transition</li><li>Leverage: smaller app shell</li><li>Tests exercise event to route</li></ul><p class="mt-3 text-xs text-slate-600"><strong>Decision to settle:</strong> distinguish lost access from transient probe failures before clearing state.</p></div></div>
+      </article>
+
+      <article id="socket" class="paper overflow-hidden rounded-2xl border border-emerald-950/10">
+        <div class="border-b border-emerald-950/10 px-6 py-6 sm:px-8"><div class="flex flex-wrap items-center gap-2"><span class="micro text-emerald-800">03 / Transport</span><span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Worth exploring</span><span class="rounded-full bg-stone-100 px-3 py-1 text-xs text-slate-600">local-substitutable</span></div><h2 class="mt-3 font-serif text-3xl">Give the socket session one lifecycle</h2><p class="mt-2 text-sm text-slate-600">Connection attempts, reconnect timers, event listeners, and pending acknowledgments are split across three modules.</p></div>
+        <div class="grid lg:grid-cols-2"><div class="border-b border-emerald-950/10 p-5 lg:border-b-0 lg:border-r sm:p-7"><div class="micro mb-4 text-red-700">Before / reconnect ownership leaks</div><div class="diagram flex flex-col justify-center gap-3 rounded-xl border border-stone-200 p-4 text-center text-xs"><div class="module p-3">App shell: connect on disconnected</div><div class="arrow text-lg">↓</div><div class="grid grid-cols-2 gap-2"><div class="module p-3">Socket hook<br>connect on mount</div><div class="module p-3">Socket state<br>status + pending acks</div></div><div class="arrow text-lg">↓</div><div class="module border-red-300 bg-red-50 p-3">Socket transport<br>each connect can add a disconnect listener<br>reconnect timer is untracked</div></div></div><div class="p-5 sm:p-7"><div class="micro mb-4 text-emerald-800">After / one deep module</div><div class="diagram flex flex-col justify-center gap-4 rounded-xl border border-stone-200 p-4 text-center"><div class="text-xs text-slate-600">App shell · channel transcript · typing · presence</div><div class="seam pt-2 text-xs text-emerald-800">one session interface</div><div class="module module-dark p-6"><div class="micro text-emerald-200">Deep module</div><div class="mt-2 font-serif text-xl">Socket session</div><div class="mt-2 text-xs text-emerald-100">connection · retry · event delivery · ack cleanup</div></div><div class="text-xs text-slate-500">Socket.io remains the transport; no extra adapter is implied.</div></div></div>
+        <div class="grid gap-5 border-t border-emerald-950/10 px-6 py-6 text-sm sm:grid-cols-[1.4fr_1fr] sm:px-8"><div><div class="micro text-slate-500">Files</div><p class="mt-2 font-mono text-xs leading-6">api/socket.ts · stores/socketStore.ts · hooks/useSocket.ts · AppShell.tsx</p><p class="mt-3"><strong>Problem.</strong> The forwarding hook is shallow while lifecycle state leaks across the seam.</p><p class="mt-2"><strong>Solution.</strong> Put one connection attempt and its cancellation in the session module.</p></div><div><div class="micro text-slate-500">Wins / test surface</div><ul class="mt-2 list-disc space-y-1 pl-5"><li>Locality: one reconnect rule</li><li>Leverage: fewer caller obligations</li><li>Tests cover disconnect cleanup</li></ul><p class="mt-3 text-xs text-slate-600"><strong>Decision to settle:</strong> intentional disconnect and server refusal must not trigger a retry.</p></div></div>
+      </article>
+
+      <article id="permissions" class="paper overflow-hidden rounded-2xl border border-emerald-950/10">
+        <div class="border-b border-emerald-950/10 px-6 py-6 sm:px-8"><div class="flex flex-wrap items-center gap-2"><span class="micro text-emerald-800">04 / Permissions</span><span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Worth exploring</span><span class="rounded-full bg-stone-100 px-3 py-1 text-xs text-slate-600">in-process</span></div><h2 class="mt-3 font-serif text-3xl">One client permission view</h2><p class="mt-2 text-sm text-slate-600">Views infer available actions from a cached server role while channel overrides can tighten that role.</p></div>
+        <div class="grid lg:grid-cols-2"><div class="border-b border-emerald-950/10 p-5 lg:border-b-0 lg:border-r sm:p-7"><div class="micro mb-4 text-red-700">Before / role shortcuts</div><div class="diagram flex flex-col justify-center gap-3 rounded-xl border border-stone-200 p-4"><div class="module p-3 text-center text-xs">Cached server role</div><div class="grid grid-cols-2 gap-2 text-center text-xs"><div class="module p-3">Message pane<br>delete action</div><div class="module p-3">Server settings<br>owner actions</div><div class="module p-3">Channel list<br>management actions</div><div class="module p-3">Overrides drawer<br>local optimistic state</div></div><div class="seam pt-2 text-center text-xs text-red-700">effective channel capability is outside these shortcuts</div></div></div><div class="p-5 sm:p-7"><div class="micro mb-4 text-emerald-800">After / shared presentation rule</div><div class="diagram flex flex-col justify-center gap-4 rounded-xl border border-stone-200 p-4 text-center"><div class="text-xs text-slate-600">Message pane · channel list · settings · override editor</div><div class="seam pt-2 text-xs text-emerald-800">one permission presentation interface</div><div class="module module-dark p-6"><div class="micro text-emerald-200">Deep module</div><div class="mt-2 font-serif text-xl">Client permission view</div><div class="mt-2 text-xs text-emerald-100">role · channel context · override freshness</div></div><div class="text-xs text-slate-500">Server enforcement remains authoritative.</div></div></div>
+        <div class="grid gap-5 border-t border-emerald-950/10 px-6 py-6 text-sm sm:grid-cols-[1.4fr_1fr] sm:px-8"><div><div class="micro text-slate-500">Files</div><p class="mt-2 font-mono text-xs leading-6">useMyRole.ts · MessagePane.tsx · ChannelList.tsx · ServerSettings.tsx · OverridesDrawer.tsx</p><p class="mt-3"><strong>Problem.</strong> Role-only checks are a shallow substitute for the backend’s tighten-only capability rules.</p><p class="mt-2"><strong>Solution.</strong> Concentrate client action visibility and refresh in one module.</p></div><div><div class="micro text-slate-500">Wins / test surface</div><ul class="mt-2 list-disc space-y-1 pl-5"><li>Locality: one presentation rule</li><li>Leverage: consistent affordances</li><li>Tests cover tightened capability</li></ul><p class="mt-3 text-xs text-slate-600"><strong>Decision to settle:</strong> how an unknown or stale permission appears while data refreshes.</p></div></div>
+      </article>
+    </section>
+
+    <section id="top-recommendation" class="mt-14 rounded-2xl bg-emerald-950 px-7 py-8 text-white sm:px-10"><div class="micro text-emerald-200">Top recommendation</div><h2 class="mt-3 font-serif text-3xl"><a class="underline decoration-emerald-400 underline-offset-4" href="#membership">One server membership view</a></h2><p class="mt-3 max-w-3xl text-sm leading-6 text-emerald-100">Four active callers repeat assembly, and stale roles affect action visibility. A deeper membership module gives immediate locality and an interface that can test refresh after role changes.</p></section>
+    <footer class="mt-10 text-xs text-slate-500">Scope: recent frontend changes through d032c64. The channel transcript module was deepened in that commit, so this review focuses on adjacent seams. No interface design is proposed yet.</footer>
+  </main>
+</body>
+</html>

@@ -113,6 +113,8 @@ One real adapter is built per interface now — the interface is what makes a se
 - Shared DTOs / error types
 - `PrismaService` — wraps `PrismaClient` as an injectable; **only adapter files inject it**, never a `*.service.ts` directly, keeping the Prisma dependency confined to the adapter layer.
 
+The root `packages/contracts/` workspace holds pure TypeScript contracts shared by the API and web clients: public HTTP/socket payload shapes and cross-client vocabulary such as server roles and channel capabilities. It contains no Nest DTO classes, runtime validation, database models, or client-only state. Runtime validators remain in the API that owns each input; optimistic UI fields remain in the web app.
+
 ---
 
 ## 6. Testing

@@ -1,5 +1,7 @@
-/** A server's authority roles, from loosest to tightest capability. */
-export type Role = 'owner' | 'moderator' | 'member';
+import type { ServerRole } from '@huddle/contracts';
+
+/** Backend-facing name for the shared server authority role vocabulary. */
+export type Role = ServerRole;
 
 /**
  * A user's membership in a server: the join row plus their role. Declared

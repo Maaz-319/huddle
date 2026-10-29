@@ -12,12 +12,15 @@ import {
   TooltipTrigger,
   TooltipContent
 } from '@/components/ui/tooltip';
+import {
+  CHANNEL_CAPABILITIES,
+  SERVER_ROLES,
+  type Capability,
+  type ServerRole,
+} from '@huddle/contracts';
 
-type Capability = 'view' | 'post' | 'delete_others' | 'manage_settings';
-type Role = 'owner' | 'moderator' | 'member';
-
-const CAPABILITIES: Capability[] = ['view', 'post', 'delete_others', 'manage_settings'];
-const ROLES: Role[] = ['owner', 'moderator', 'member'];
+const CAPABILITIES: readonly Capability[] = CHANNEL_CAPABILITIES;
+const ROLES: readonly ServerRole[] = SERVER_ROLES;
 
 const CAPABILITY_LABELS: Record<Capability, string> = {
   view: 'View Channel',
@@ -40,7 +43,7 @@ const CAPABILITY_DESCRIPTIONS: Record<Capability, string> = {
   manage_settings: 'Can edit channel name, privacy, and overrides',
 };
 
-const ROLE_LABELS: Record<Role, string> = {
+const ROLE_LABELS: Record<ServerRole, string> = {
   owner: 'Owner',
   moderator: 'Moderator',
   member: 'Member',
@@ -96,7 +99,7 @@ export function OverridesDrawer({ open, onOpenChange, channelId, serverId }: Ove
     if (open && !canManage) onOpenChange(false);
   }, [canManage, onOpenChange, open]);
 
-  const handleToggle = async (role: Role, capability: Capability) => {
+  const handleToggle = async (role: ServerRole, capability: Capability) => {
     if (role === 'owner' || !canManage) return; // Owner is never overridable
 
     const key = `${role}:${capability}`;
@@ -131,7 +134,7 @@ export function OverridesDrawer({ open, onOpenChange, channelId, serverId }: Ove
     }
   };
 
-  const isRevoked = (role: Role, capability: Capability) => {
+  const isRevoked = (role: ServerRole, capability: Capability) => {
     return overrides[role]?.[capability] ?? false;
   };
 

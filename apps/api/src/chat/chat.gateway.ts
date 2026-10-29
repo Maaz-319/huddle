@@ -55,6 +55,14 @@ import {
   type PolicyViolation,
 } from './socket-frame';
 import { parseTypingFrame, TypingAck, TypingBroadcast } from './typing.frame';
+import type {
+  ChannelAdded as ChannelAddedPayload,
+  MembershipChanged as MembershipChangedPayload,
+  ChannelRemoved as ChannelRemovedPayload,
+  PresenceOffline as PresenceOfflinePayload,
+  PresenceOnline as PresenceOnlinePayload,
+} from '@huddle/contracts';
+import { CLIENT_SOCKET_EVENT, SERVER_SOCKET_EVENT } from '@huddle/contracts';
 
 /**
  * The beat between the `policy_violation` notice and the close it
@@ -117,9 +125,12 @@ export class ChatGateway implements OnGatewayConnection {
           const servers = await this.administration.getUserServerIds(userId);
           if (!servers.some((server) => server.id === serverId)) return;
           for (const socketId of this.getSocketIdsForUser(userId)) {
-            this.reachSocket(socketId).emit('membership_changed', {
-              serverId: serverId.toString(),
-            });
+            this.reachSocket(socketId).emit(
+              SERVER_SOCKET_EVENT.MEMBERSHIP_CHANGED,
+              {
+                serverId: serverId.toString(),
+              } satisfies MembershipChangedPayload,
+            );
           }
         } catch (error) {
           this.logger.warn('ChatGateway', 'Membership notification failed', {
@@ -291,9 +302,9 @@ export class ChatGateway implements OnGatewayConnection {
     for (const recipientId of recipients) {
       const socketIds = this.getSocketIdsForUser(recipientId);
       for (const socketId of socketIds) {
-        this.reachSocket(socketId).emit('presence_online', {
+        this.reachSocket(socketId).emit(SERVER_SOCKET_EVENT.PRESENCE_ONLINE, {
           userId: payload.userId.toString(),
-        });
+        } satisfies PresenceOnlinePayload);
       }
     }
   }
@@ -318,9 +329,9 @@ export class ChatGateway implements OnGatewayConnection {
     for (const recipientId of recipients) {
       const socketIds = this.getSocketIdsForUser(recipientId);
       for (const socketId of socketIds) {
-        this.reachSocket(socketId).emit('presence_offline', {
+        this.reachSocket(socketId).emit(SERVER_SOCKET_EVENT.PRESENCE_OFFLINE, {
           userId: payload.userId.toString(),
-        });
+        } satisfies PresenceOfflinePayload);
       }
     }
   }
@@ -433,15 +444,20 @@ export class ChatGateway implements OnGatewayConnection {
         for (const room of [...socket.rooms]) {
           if (room === socket.id || accessibleIds.has(room)) continue;
           await socket.leave(room);
-          this.reachSocket(socket.id).emit('channel_removed', {
-            channelId: room,
-          });
+          this.reachSocket(socket.id).emit(
+            SERVER_SOCKET_EVENT.CHANNEL_REMOVED,
+            {
+              channelId: room,
+            } satisfies ChannelRemovedPayload,
+          );
         }
 
         for (const channelId of accessibleIds) {
           if (socket.rooms.has(channelId)) continue;
           await socket.join(channelId);
-          this.reachSocket(socket.id).emit('channel_added', { channelId });
+          this.reachSocket(socket.id).emit(SERVER_SOCKET_EVENT.CHANNEL_ADDED, {
+            channelId,
+          } satisfies ChannelAddedPayload);
         }
       }
     } catch (error) {
@@ -493,14 +509,18 @@ export class ChatGateway implements OnGatewayConnection {
     idempotencyKey?: string,
   ): void {
     if (sender && idempotencyKey) {
-      sender.to(channelId.toString()).emit('message_create', message);
-      this.reachSocket(sender.id).emit('message_create', {
+      sender
+        .to(channelId.toString())
+        .emit(SERVER_SOCKET_EVENT.MESSAGE_CREATE, message);
+      this.reachSocket(sender.id).emit(SERVER_SOCKET_EVENT.MESSAGE_CREATE, {
         ...message,
         idempotencyKey,
       });
       return;
     }
-    this.server.to(channelId.toString()).emit('message_create', message);
+    this.server
+      .to(channelId.toString())
+      .emit(SERVER_SOCKET_EVENT.MESSAGE_CREATE, message);
   }
 
   /**
@@ -513,7 +533,9 @@ export class ChatGateway implements OnGatewayConnection {
    * create.
    */
   broadcastUpdate(channelId: bigint, message: MessageResponse): void {
-    this.server.to(channelId.toString()).emit('message_update', message);
+    this.server
+      .to(channelId.toString())
+      .emit(SERVER_SOCKET_EVENT.MESSAGE_UPDATE, message);
   }
 
   /**
@@ -526,7 +548,9 @@ export class ChatGateway implements OnGatewayConnection {
    * not need the service to hand a message back just to build this.
    */
   broadcastDelete(channelId: bigint, deletion: MessageDeleteResponse): void {
-    this.server.to(channelId.toString()).emit('message_delete', deletion);
+    this.server
+      .to(channelId.toString())
+      .emit(SERVER_SOCKET_EVENT.MESSAGE_DELETE, deletion);
   }
 
   /**
@@ -549,7 +573,7 @@ export class ChatGateway implements OnGatewayConnection {
    * `{ idempotencyKey?, error: { code, retryable } }`, so the client can
    * tell auto-retry (rate limited) from giving up (everything else).
    */
-  @SubscribeMessage('message_send')
+  @SubscribeMessage(CLIENT_SOCKET_EVENT.MESSAGE_SEND)
   async onMessageSend(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() raw: unknown,
@@ -633,7 +657,7 @@ export class ChatGateway implements OnGatewayConnection {
    * above: re-running the edit would re-stamp `editedAt`, and re-emitting
    * would move every client's marker for a client-side retry.
    */
-  @SubscribeMessage('message_edit')
+  @SubscribeMessage(CLIENT_SOCKET_EVENT.MESSAGE_EDIT)
   async onMessageEdit(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() raw: unknown,
@@ -716,7 +740,7 @@ export class ChatGateway implements OnGatewayConnection {
    * A deduped replay acks and does not re-broadcast — the room was already
    * told once.
    */
-  @SubscribeMessage('message_delete')
+  @SubscribeMessage(CLIENT_SOCKET_EVENT.MESSAGE_DELETE)
   async onMessageDelete(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() raw: unknown,
@@ -811,7 +835,7 @@ export class ChatGateway implements OnGatewayConnection {
    * the same failure shape every other frame sends. And there is no
    * stopped-typing event: see `typing.frame.ts` for why that is deliberate.
    */
-  @SubscribeMessage('typing')
+  @SubscribeMessage(CLIENT_SOCKET_EVENT.TYPING)
   async onTyping(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() raw: unknown,
@@ -836,7 +860,7 @@ export class ChatGateway implements OnGatewayConnection {
 
       const limitRefusal = await this.limitFrame(
         socket,
-        'typing',
+        SERVER_SOCKET_EVENT.TYPING,
         frame.channelId,
       );
 
@@ -849,7 +873,9 @@ export class ChatGateway implements OnGatewayConnection {
         channelId: frame.channelId.toString(),
         userId: socket.data.user.id.toString(),
       };
-      socket.to(frame.channelId.toString()).emit('typing', broadcast);
+      socket
+        .to(frame.channelId.toString())
+        .emit(SERVER_SOCKET_EVENT.TYPING, broadcast);
     } catch (error) {
       if (!(error instanceof DomainError)) {
         this.logger.error(
@@ -897,7 +923,7 @@ export class ChatGateway implements OnGatewayConnection {
    * The reply is pure state, so a retried frame simply asks again, and the
    * failure half is the same shape every other frame sends.
    */
-  @SubscribeMessage('catch_up')
+  @SubscribeMessage(CLIENT_SOCKET_EVENT.CATCH_UP)
   async onCatchUp(
     @ConnectedSocket() socket: AuthenticatedSocket,
     @MessageBody() raw: unknown,

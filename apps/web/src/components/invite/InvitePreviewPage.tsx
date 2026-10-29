@@ -7,14 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useServerStore } from '@/stores/serverStore';
 import { toast } from '@/stores/toastStore';
 import { saveReturnTo } from '@/utils/returnTo';
-
-interface InvitePreviewResponse {
-  server: {
-    id: string;
-    name: string;
-    iconUrl: string | null;
-  };
-}
+import type { InvitePreviewResponse } from '@huddle/contracts';
 
 function getInitials(name: string): string {
   return name

@@ -13,6 +13,7 @@ import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
 import { ParseInviteCodePipe } from './parse-invite-code.pipe';
 import type { Server } from './server-repository.interface';
+import type { InvitePreviewResponse } from '@huddle/contracts';
 
 /**
  * What a code holder learns about a server before joining it.
@@ -21,14 +22,6 @@ import type { Server } from './server-repository.interface';
  * holding a code is not yet a member, and should learn only enough to decide
  * whether to accept.
  */
-interface InvitePreviewResponse {
-  server: {
-    id: string;
-    name: string;
-    iconUrl: string | null;
-  };
-}
-
 function toPreviewResponse(server: Server): InvitePreviewResponse {
   return {
     server: {

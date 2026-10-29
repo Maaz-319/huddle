@@ -21,13 +21,7 @@ import { REQUIRE_CAPABILITY_KEY } from './require-capability.decorator';
 import { resolveCapability } from './resolve-capability';
 import { User } from './user-repository.interface';
 import { ChannelPermissionRequest } from './current-channel-capabilities.decorator';
-
-const CHANNEL_CAPABILITIES: readonly Capability[] = [
-  'view',
-  'post',
-  'delete_others',
-  'manage_settings',
-];
+import { CHANNEL_CAPABILITIES as ALL_CHANNEL_CAPABILITIES } from '@huddle/contracts';
 
 /**
  * Enforces `@RequireCapability`: the caller must hold the decorated
@@ -117,7 +111,7 @@ export class RequireCapabilityGuard implements CanActivate {
     // Asserted in the spec, because it is a rule (PRD section 5) and not
     // merely an optimisation.
     if (membership.role === 'owner') {
-      request.effectiveChannelCapabilities = [...CHANNEL_CAPABILITIES];
+      request.effectiveChannelCapabilities = [...ALL_CHANNEL_CAPABILITIES];
       return true;
     }
 
@@ -134,7 +128,7 @@ export class RequireCapabilityGuard implements CanActivate {
       isChannelMember,
       overrides,
     };
-    request.effectiveChannelCapabilities = CHANNEL_CAPABILITIES.filter(
+    request.effectiveChannelCapabilities = ALL_CHANNEL_CAPABILITIES.filter(
       (candidate) => resolveCapability(capabilityContext, candidate).allowed,
     );
     const decision = resolveCapability(capabilityContext, capability);

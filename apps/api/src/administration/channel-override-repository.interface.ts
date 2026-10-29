@@ -1,3 +1,8 @@
+import type {
+  Capability as SharedCapability,
+  OverrideRole as SharedOverrideRole,
+} from '@huddle/contracts';
+
 /**
  * The roles a channel override can name.
  *
@@ -8,10 +13,10 @@
  * `OverrideRole` enum in `schema.prisma`, which is separate from `Role` for
  * exactly this reason.
  */
-export type OverrideRole = 'moderator' | 'member';
+export type OverrideRole = SharedOverrideRole;
 
 /** The four things a role can hold in a channel — administration-service.md section 4. */
-export type Capability = 'view' | 'post' | 'delete_others' | 'manage_settings';
+export type Capability = SharedCapability;
 
 /**
  * A revocation. There is no value column, and that is the whole design: the

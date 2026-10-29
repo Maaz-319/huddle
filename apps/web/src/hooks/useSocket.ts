@@ -3,11 +3,12 @@ import { useSocketStore } from '@/stores/socketStore';
 import { connectSocket, disconnectSocket, emitWithAck, onServerEvent } from '@/api/socket';
 import type { SocketStatus, ClientEventMap, ClientEventType, ServerEventMap, ServerEventType, AckResponseMap } from '@/types/socket';
 import { crypto } from '@/utils/crypto';
+import { CLIENT_SOCKET_EVENT } from '@huddle/contracts';
 
 const IDEMPOTENT_CLIENT_EVENTS: ReadonlySet<string> = new Set([
-  'message_send',
-  'message_edit',
-  'message_delete',
+  CLIENT_SOCKET_EVENT.MESSAGE_SEND,
+  CLIENT_SOCKET_EVENT.MESSAGE_EDIT,
+  CLIENT_SOCKET_EVENT.MESSAGE_DELETE,
 ]);
 
 function toWirePayload<K extends ClientEventType>(
