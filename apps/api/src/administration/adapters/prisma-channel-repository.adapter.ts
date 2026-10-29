@@ -48,6 +48,30 @@ export class PrismaChannelRepository extends ChannelRepository {
     }
   }
 
+  async createPrivate(
+    input: Omit<CreateChannelInput, 'isPrivate'>,
+    creatorId: bigint,
+  ): Promise<Channel> {
+    try {
+      const row = await this.prisma.channel.create({
+        data: {
+          id: this.snowflakes.generate(),
+          ...input,
+          isPrivate: true,
+          members: { create: { userId: creatorId } },
+        },
+      });
+
+      return toChannel(row);
+    } catch (error) {
+      if (hasPrismaCode(error, UNIQUE_VIOLATION)) {
+        throw this.duplicateName(input.serverId, input.name);
+      }
+
+      throw error;
+    }
+  }
+
   async findById(id: bigint): Promise<Channel | null> {
     const row = await this.prisma.channel.findUnique({ where: { id } });
 

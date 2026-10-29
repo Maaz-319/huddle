@@ -48,7 +48,10 @@ export const useMembershipStore = create<MembershipStore>((set, get) => ({
     if (existing) return existing;
     const version = versions.get(serverId) ?? 0;
     const current = get().byServer[serverId] ?? emptyEntry;
-    set((state) => ({ byServer: { ...state.byServer, [serverId]: { ...current, loading: true, verified: false, error: null } } }));
+    // Keep the last confirmed role usable while this background read runs.
+    // Explicit invalidation (membership changes) still clears verification;
+    // a failed refresh also clears it below. The API remains authoritative.
+    set((state) => ({ byServer: { ...state.byServer, [serverId]: { ...current, loading: true, error: null } } }));
     const request = (async () => {
       try {
         const rows = await apiClient.get<ServerMemberResponse[]>(`/servers/${serverId}/members`);

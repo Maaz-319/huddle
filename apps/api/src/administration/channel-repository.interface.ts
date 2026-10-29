@@ -43,13 +43,20 @@ export abstract class ChannelRepository {
    * uniqueness is scoped to the server, so the same name in a different
    * server is not a conflict.
    *
-   * Creating a private channel deliberately seats *nobody*: no
-   * `ChannelMember` row is written here. Who is in a private channel is for
-   * the member routes to decide, and an implicit creator row would be a grant
-   * this port could not later explain. The creator reaches the channel
-   * through their server role, and the owner always can (PRD section 5).
+   * Creates a channel without an initial private-channel seat. Use
+   * `createPrivate` for a moderator-created private channel.
    */
   abstract create(input: CreateChannelInput): Promise<Channel>;
+
+  /**
+   * Creates a private channel and seats its moderator creator in the same
+   * database transaction. Otherwise the creator would be hidden from the
+   * channel immediately after creation and unable to manage its membership.
+   */
+  abstract createPrivate(
+    input: Omit<CreateChannelInput, 'isPrivate'>,
+    creatorId: bigint,
+  ): Promise<Channel>;
 
   /** The channel with this id, or `null`. */
   abstract findById(id: bigint): Promise<Channel | null>;

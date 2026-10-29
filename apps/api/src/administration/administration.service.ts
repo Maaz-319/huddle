@@ -458,6 +458,7 @@ export class AdministrationService {
     input: CreateChannelInput,
     callerId: bigint,
   ): Promise<Channel> {
+    let creatorRole: Role | null = null;
     if (input.isPrivate) {
       const membership = await this.memberships.findByServerAndUser(
         input.serverId,
@@ -473,6 +474,14 @@ export class AdministrationService {
           { serverId: input.serverId.toString() },
         );
       }
+      creatorRole = membership.role;
+    }
+
+    if (input.isPrivate && creatorRole === 'moderator') {
+      return this.channels.createPrivate(
+        { serverId: input.serverId, name: input.name },
+        callerId,
+      );
     }
 
     return this.channels.create(input);

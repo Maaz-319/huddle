@@ -1,6 +1,7 @@
 import { describeChannelRepositoryContract } from './channel-repository.contract';
 import { FakeAdministrationStore } from './fake-administration-store';
 import { FakeChannelRepository } from './fake-channel-repository';
+import { FakeChannelMemberRepository } from './fake-channel-member-repository';
 import { FakeServerRepository } from './fake-server-repository';
 
 /**
@@ -12,6 +13,7 @@ describeChannelRepositoryContract('FakeChannelRepository', () => {
 
   return Promise.resolve({
     channels: new FakeChannelRepository(store),
+    channelMembers: new FakeChannelMemberRepository(store),
     servers: new FakeServerRepository(store),
   });
 });
