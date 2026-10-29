@@ -9,10 +9,12 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import {
+  MEMBERSHIP_CHANGED,
   SERVER_ACCESS_CHANGED,
   USER_ACCESS_CHANGED,
 } from '../administration/access-events';
 import type {
+  MembershipChanged,
   ServerAccessChanged,
   UserAccessChanged,
 } from '../administration/access-events';
@@ -101,6 +103,33 @@ export class ChatGateway implements OnGatewayConnection {
    * record.
    */
   private readonly escalated = new WeakSet<AuthenticatedSocket>();
+
+  @OnEvent(MEMBERSHIP_CHANGED)
+  async onMembershipChanged({ serverId }: MembershipChanged): Promise<void> {
+    const connectedUsers = new Set(
+      [...this.server.sockets.sockets.values()].map(
+        (socket) => socket.data.user.id,
+      ),
+    );
+    await Promise.all(
+      [...connectedUsers].map(async (userId) => {
+        try {
+          const servers = await this.administration.getUserServerIds(userId);
+          if (!servers.some((server) => server.id === serverId)) return;
+          for (const socketId of this.getSocketIdsForUser(userId)) {
+            this.reachSocket(socketId).emit('membership_changed', {
+              serverId: serverId.toString(),
+            });
+          }
+        } catch (error) {
+          this.logger.warn('ChatGateway', 'Membership notification failed', {
+            error: String(error),
+            userId: userId.toString(),
+          });
+        }
+      }),
+    );
+  }
 
   /**
    * The socket.io server Nest binds here once the adapter has created it.
@@ -571,7 +600,12 @@ export class ChatGateway implements OnGatewayConnection {
         messageId: response.id,
         createdAt: response.createdAt,
       });
-      this.broadcastCreate(frame.channelId, response, socket, frame.idempotencyKey);
+      this.broadcastCreate(
+        frame.channelId,
+        response,
+        socket,
+        frame.idempotencyKey,
+      );
     } catch (error) {
       // A domain refusal is an answered question, not a fault; anything else
       // is a bug and belongs in the log with its stack.

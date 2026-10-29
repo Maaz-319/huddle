@@ -12,7 +12,11 @@ import {
   NotFoundError,
   ValidationError,
 } from '../common/errors';
-import { SERVER_ACCESS_CHANGED, USER_ACCESS_CHANGED } from './access-events';
+import {
+  MEMBERSHIP_CHANGED,
+  SERVER_ACCESS_CHANGED,
+  USER_ACCESS_CHANGED,
+} from './access-events';
 import { AdministrationService } from './administration.service';
 import { Role } from './membership-repository.interface';
 
@@ -340,6 +344,10 @@ describe('AdministrationService', () => {
       await expect(
         memberships.findByServerAndUser(server.id, OTHER_USER_ID),
       ).resolves.toMatchObject({ role: 'member' });
+      expect(events.emitted).toEqual([
+        { event: MEMBERSHIP_CHANGED, payload: { serverId: server.id } },
+        { event: USER_ACCESS_CHANGED, payload: { userId: OTHER_USER_ID } },
+      ]);
     });
 
     it('joining twice leaves exactly one membership and never conflicts', async () => {
@@ -1222,7 +1230,9 @@ describe('AdministrationService', () => {
 
       expect(events.emitted).toEqual([
         { event: USER_ACCESS_CHANGED, payload: { userId: OTHER_USER_ID } },
+        { event: MEMBERSHIP_CHANGED, payload: { serverId } },
         { event: USER_ACCESS_CHANGED, payload: { userId: OTHER_USER_ID } },
+        { event: MEMBERSHIP_CHANGED, payload: { serverId } },
       ]);
     });
 
@@ -1305,6 +1315,7 @@ describe('AdministrationService', () => {
 
       expect(events.emitted).toStrictEqual([
         { event: SERVER_ACCESS_CHANGED, payload: { serverId } },
+        { event: MEMBERSHIP_CHANGED, payload: { serverId } },
       ]);
     });
 
