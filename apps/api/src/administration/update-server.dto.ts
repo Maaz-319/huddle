@@ -1,5 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Length,
+} from 'class-validator';
 import { NAME_LENGTH } from './create-server.dto';
 import { Server } from './server-repository.interface';
 
@@ -21,6 +28,7 @@ export class UpdateServerDto {
 
   @IsOptional()
   @IsString()
+  @IsUrl({ protocols: ['https'], require_protocol: true })
   iconUrl?: string;
 
   @IsOptional()

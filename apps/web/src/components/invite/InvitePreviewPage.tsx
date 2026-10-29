@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useServerStore } from '@/stores/serverStore';
 import { toast } from '@/stores/toastStore';
 import { saveReturnTo } from '@/utils/returnTo';
+import { safeServerIconUrl } from '@/utils/serverIcon';
 import type { InvitePreviewResponse } from '@huddle/contracts';
 
 function getInitials(name: string): string {
@@ -163,14 +164,17 @@ export function InvitePreviewPage() {
     );
   }
 
+  const iconUrl = safeServerIconUrl(server.iconUrl);
+
   return (
     <div className="min-h-screen bg-bg-base flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="bg-bg-raised border border-border-subtle rounded-xl overflow-hidden">
           <div className="p-6 text-center">
-            {server.iconUrl ? (
+            {iconUrl ? (
               <img 
-                src={server.iconUrl} 
+                src={iconUrl}
+                referrerPolicy="no-referrer"
                 alt="" 
                 className="h-20 w-20 rounded-xl mx-auto mb-4 object-cover" 
               />
