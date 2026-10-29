@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useMembershipStore } from './membershipStore';
 import { useAuthStore } from './authStore';
 import { useMyRole } from '@/hooks/useMyRole';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
+import { useChannelStore } from './channelStore';
 import type { ServerMemberResponse } from '@/types/channel';
 
 const calls = vi.hoisted(() => ({ get: vi.fn(), getUsers: vi.fn() }));
@@ -17,6 +19,7 @@ const profile = { id: userId, username: 'Ada', avatarUrl: '', bio: 'Hello', emai
 describe('server membership view', () => {
   beforeEach(() => {
     useMembershipStore.getState().clear();
+    useChannelStore.getState().clear();
     useAuthStore.setState({ user: profile });
     calls.get.mockReset().mockResolvedValue([row]);
     calls.getUsers.mockReset().mockResolvedValue([profile]);
@@ -63,5 +66,42 @@ describe('server membership view', () => {
     expect(result.current).toBeNull();
     await act(async () => { resolve([{ ...row, role: 'moderator' }]); });
     await waitFor(() => expect(result.current).toBe('moderator'));
+  });
+
+  it('exposes channel capabilities only after both role and channel data are verified', async () => {
+    const channelId = '900000000000000003';
+    const { result } = renderHook(() => useMyPermissions(serverId, channelId));
+
+    await waitFor(() => expect(result.current.role).toBe('member'));
+    expect(result.current.confirmed).toBe(false);
+    expect(result.current.can('post')).toBe(false);
+
+    act(() => {
+      useChannelStore.setState({
+        channelsByServer: new Map([[serverId, [{
+          id: channelId,
+          serverId,
+          name: 'general',
+          isPrivate: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          myCapabilities: ['view'],
+        }]]]),
+        verifiedChannelIds: new Set([channelId]),
+        permissionUserId: userId,
+      });
+    });
+
+    expect(result.current.confirmed).toBe(true);
+    expect(result.current.can('view')).toBe(true);
+    expect(result.current.can('post')).toBe(false);
+    expect(result.current.hasRole('owner')).toBe(false);
+
+    act(() => useAuthStore.setState({ user: { ...profile, id: '900000000000000004' } }));
+    expect(result.current.confirmed).toBe(false);
+    expect(result.current.hasRole('owner')).toBe(false);
+
+    act(() => useChannelStore.getState().clear());
+    expect(result.current.confirmed).toBe(false);
+    expect(result.current.can('view')).toBe(false);
   });
 });

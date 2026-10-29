@@ -16,6 +16,7 @@ import { getInitials, getColorFromString } from '@/utils/avatar';
 interface MessageProps {
   message: MessageResponse;
   isOwn: boolean;
+  canPost?: boolean;
   canDeleteOthers?: boolean;
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
@@ -24,7 +25,7 @@ interface MessageProps {
   onDiscard?: (messageId: string) => void;
 }
 
-export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
+export function Message({ message, isOwn, canPost = true, canDeleteOthers = false, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content ?? '');
   const [editFailed, setEditFailed] = useState(false);
@@ -236,7 +237,7 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
                   Copy text
                 </DropdownMenuItem>
               )}
-              {isOwn && !isFailed && !isPending && (
+              {isOwn && canPost && !isFailed && !isPending && (
                 <DropdownMenuItem
                   onClick={() => {
                     setIsEditing(true);
@@ -248,8 +249,8 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
                   Edit
                 </DropdownMenuItem>
               )}
-              {isOwn && !isFailed && !isPending && <DropdownMenuSeparator />}
-              {(isOwn || canDeleteOthers) && !isFailed && !isPending && (
+              {isOwn && canPost && !isFailed && !isPending && <DropdownMenuSeparator />}
+              {((isOwn && canPost) || canDeleteOthers) && !isFailed && !isPending && (
                 <DropdownMenuItem
                   onClick={() => onDelete?.(message.id)}
                   className="flex items-center gap-2 text-red-400 focus:text-red-300"

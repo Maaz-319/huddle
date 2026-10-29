@@ -5,7 +5,6 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 import { ChannelMemberRepository } from '../administration/channel-member-repository.interface';
 import {
   Capability,
@@ -21,6 +20,14 @@ import {
 import { REQUIRE_CAPABILITY_KEY } from './require-capability.decorator';
 import { resolveCapability } from './resolve-capability';
 import { User } from './user-repository.interface';
+import { ChannelPermissionRequest } from './current-channel-capabilities.decorator';
+
+const CHANNEL_CAPABILITIES: readonly Capability[] = [
+  'view',
+  'post',
+  'delete_others',
+  'manage_settings',
+];
 
 /**
  * Enforces `@RequireCapability`: the caller must hold the decorated
@@ -82,7 +89,9 @@ export class RequireCapabilityGuard implements CanActivate {
     // Coverage is opt-in: an undecorated route makes no lookup at all.
     if (capability === undefined) return true;
 
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context
+      .switchToHttp()
+      .getRequest<ChannelPermissionRequest>();
     const rawChannelId = request.params.channelId;
 
     if (typeof rawChannelId !== 'string' || !isSnowflakeString(rawChannelId)) {
@@ -107,7 +116,10 @@ export class RequireCapabilityGuard implements CanActivate {
     // The owner short-circuits before either channel-scoped table is read.
     // Asserted in the spec, because it is a rule (PRD section 5) and not
     // merely an optimisation.
-    if (membership.role === 'owner') return true;
+    if (membership.role === 'owner') {
+      request.effectiveChannelCapabilities = [...CHANNEL_CAPABILITIES];
+      return true;
+    }
 
     const [isChannelMember, overrides] = await Promise.all([
       channel.isPrivate
@@ -116,15 +128,16 @@ export class RequireCapabilityGuard implements CanActivate {
       this.overrides.findByChannelId(channelId),
     ]);
 
-    const decision = resolveCapability(
-      {
-        role: membership.role,
-        isPrivate: channel.isPrivate,
-        isChannelMember,
-        overrides,
-      },
-      capability,
+    const capabilityContext = {
+      role: membership.role,
+      isPrivate: channel.isPrivate,
+      isChannelMember,
+      overrides,
+    };
+    request.effectiveChannelCapabilities = CHANNEL_CAPABILITIES.filter(
+      (candidate) => resolveCapability(capabilityContext, candidate).allowed,
     );
+    const decision = resolveCapability(capabilityContext, capability);
 
     if (decision.allowed) return true;
 

@@ -6,11 +6,14 @@ import type { ServerRole } from '@/types/channel';
 export function useMyRole(serverId: string | null): ServerRole | null {
   const myId = useAuthStore((state) => state.user?.id);
   const entry = useMembershipStore((state) => serverId ? state.byServer[serverId] : undefined);
+  const membershipUserId = useMembershipStore((state) => state.userId);
   const refresh = useMembershipStore((state) => state.refresh);
 
   useEffect(() => {
     if (serverId && myId) void refresh(serverId);
   }, [serverId, myId, refresh]);
 
-  return entry?.verified ? entry.members.find((member) => member.userId === myId)?.role ?? null : null;
+  return membershipUserId === myId && entry?.verified
+    ? entry.members.find((member) => member.userId === myId)?.role ?? null
+    : null;
 }

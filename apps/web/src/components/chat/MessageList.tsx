@@ -6,6 +6,7 @@ import type { MessageResponse } from '@/types/socket';
 interface MessageListProps {
   messages: MessageResponse[];
   isOwn: (authorId: string) => boolean;
+  canPost?: boolean;
   canDeleteOthers?: boolean;
   onEdit: (messageId: string, content: string) => Promise<void>;
   onDelete: (messageId: string) => Promise<void>;
@@ -26,6 +27,7 @@ const OLDER_BANNER_HEIGHT = 40;
 export function MessageList({
   messages,
   isOwn,
+  canPost = true,
   canDeleteOthers = false,
   onEdit,
   onDelete,
@@ -158,6 +160,7 @@ export function MessageList({
               <Message
                 message={message}
                 isOwn={isOwn(message.authorId)}
+                canPost={canPost}
                 canDeleteOthers={canDeleteOthers}
                 onEdit={onEdit}
                 onDelete={onDelete}

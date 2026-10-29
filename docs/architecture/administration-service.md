@@ -98,6 +98,11 @@ The server-wide starting point every channel tightens *down* from. Enforced by
 | **Delete-others'-messages** | ✅ | ✅ | ❌ |
 | **Manage-channel-settings** | ✅ | ✅ | ❌ |
 
+Channel object responses include `myCapabilities`, the authenticated caller's
+effective capability names for that channel. The channel list still omits any
+channel where the caller lacks `view`. This field lets the client present the
+right actions; authorization for every operation remains server-side.
+
 A Member never holds delete-others or manage-settings anywhere in the server, so
 there is nothing for a channel override to take away — an override naming that
 pair is inert rather than wrong.

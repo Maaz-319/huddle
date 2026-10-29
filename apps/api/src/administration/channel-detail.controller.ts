@@ -10,10 +10,14 @@ import {
 } from '@nestjs/common';
 import { RequireCapability } from '../auth/require-capability.decorator';
 import { RequireCapabilityGuard } from '../auth/require-capability.guard';
+import { CurrentChannelCapabilities } from '../auth/current-channel-capabilities.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { User } from '../auth/user-repository.interface';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { ParseSnowflakePipe } from '../common/parse-snowflake.pipe';
 import { RateLimit } from '../rate-limiter/rate-limit.decorator';
 import { AdministrationService } from './administration.service';
+import type { Capability } from './channel-override-repository.interface';
 import { ChannelResponse, toChannelResponse } from './channel.controller';
 import { UpdateChannelDto } from './update-channel.dto';
 
@@ -46,10 +50,11 @@ export class ChannelDetailController {
   @RateLimit('read')
   async get(
     @Param('channelId', ParseSnowflakePipe) channelId: bigint,
+    @CurrentChannelCapabilities() myCapabilities: Capability[],
   ): Promise<ChannelResponse> {
     const channel = await this.administration.getChannel(channelId);
 
-    return toChannelResponse(channel);
+    return toChannelResponse(channel, myCapabilities);
   }
 
   /**
@@ -77,13 +82,17 @@ export class ChannelDetailController {
   async update(
     @Param('channelId', ParseSnowflakePipe) channelId: bigint,
     @Body() dto: UpdateChannelDto,
+    @CurrentUser() user: User,
   ): Promise<ChannelResponse> {
     // Passed straight through, as `updateServer` does: the DTO's shape is
     // `UpdateChannelInput`'s, and `whitelist: true` has already stripped
     // anything else off the body.
     const channel = await this.administration.updateChannel(channelId, dto);
 
-    return toChannelResponse(channel);
+    return toChannelResponse(
+      channel,
+      await this.administration.getChannelCapabilities(channel, user.id),
+    );
   }
 
   /**

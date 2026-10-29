@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
 import { useChannelStore } from '@/stores/channelStore';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
 import {
   Tooltip,
   TooltipTrigger,
@@ -49,9 +50,12 @@ interface OverridesDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   channelId: string;
+  serverId: string;
 }
 
-export function OverridesDrawer({ open, onOpenChange, channelId }: OverridesDrawerProps) {
+export function OverridesDrawer({ open, onOpenChange, channelId, serverId }: OverridesDrawerProps) {
+  const permissions = useMyPermissions(serverId || null, channelId || null);
+  const canManage = permissions.can('manage_settings');
   const { listOverrides, revokeCapability, restoreCapability } = useChannelStore();
 
   const [overrides, setOverrides] = useState<Record<string, Record<string, boolean>>>({});
@@ -82,14 +86,18 @@ export function OverridesDrawer({ open, onOpenChange, channelId }: OverridesDraw
   }, [channelId, listOverrides]);
 
   useEffect(() => {
-    if (open) {
+    if (open && canManage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       loadOverrides();
     }
-  }, [open, channelId, loadOverrides]);
+  }, [open, canManage, channelId, loadOverrides]);
+
+  useEffect(() => {
+    if (open && !canManage) onOpenChange(false);
+  }, [canManage, onOpenChange, open]);
 
   const handleToggle = async (role: Role, capability: Capability) => {
-    if (role === 'owner') return; // Owner is never overridable
+    if (role === 'owner' || !canManage) return; // Owner is never overridable
 
     const key = `${role}:${capability}`;
     setSaving(key);
@@ -128,7 +136,7 @@ export function OverridesDrawer({ open, onOpenChange, channelId }: OverridesDraw
   };
 
   return (
-    <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
+    <RadixDialog.Root open={open && canManage} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
         <RadixDialog.Content className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-2xl bg-bg-raised border-l border-border-subtle shadow-xl flex flex-col outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right">

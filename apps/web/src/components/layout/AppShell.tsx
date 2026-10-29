@@ -100,6 +100,7 @@ export function AppShell() {
     if (membershipUserRef.current !== user?.id) {
       useMembershipStore.getState().clear();
       useChannelAccessStore.getState().clear();
+      useChannelStore.getState().clear();
       membershipUserRef.current = user?.id ?? null;
     }
     if (user) {
@@ -133,7 +134,7 @@ export function AppShell() {
     if (params.serverId) {
       fetchChannels(params.serverId);
     }
-  }, [params.serverId, params.channelId, setCurrentServerId, setCurrentChannelId, setActiveMobileTab, fetchChannels]);
+  }, [userId, params.serverId, params.channelId, setCurrentServerId, setCurrentChannelId, setActiveMobileTab, fetchChannels]);
 
   // Connect socket when authenticated
   useEffect(() => {

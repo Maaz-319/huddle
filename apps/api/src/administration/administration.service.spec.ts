@@ -609,6 +609,57 @@ describe('AdministrationService', () => {
     });
   });
 
+  describe('channel capability views', () => {
+    it('returns only the caller role capabilities after channel overrides', async () => {
+      const serverId = await seedServer('moderator');
+      const channel = await channels.create({
+        serverId,
+        name: 'staff',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(channel.id, 'moderator', 'delete_others');
+
+      const [view] = await service.listChannelViews(serverId, OTHER_USER_ID);
+
+      expect(view).toEqual({
+        channel,
+        myCapabilities: ['view', 'post', 'manage_settings'],
+      });
+    });
+
+    it('returns every capability for the owner without reading overrides', async () => {
+      const serverId = await seedServer('owner');
+      const channel = await channels.create({
+        serverId,
+        name: 'private',
+        isPrivate: true,
+      });
+      const findOverrides = jest.spyOn(channelOverrides, 'findByChannelIds');
+
+      const [view] = await service.listChannelViews(serverId, OWNER_ID);
+
+      expect(view).toEqual({
+        channel,
+        myCapabilities: ['view', 'post', 'delete_others', 'manage_settings'],
+      });
+      expect(findOverrides).not.toHaveBeenCalled();
+    });
+
+    it('computes a single channel view for its signed-in member', async () => {
+      const serverId = await seedServer('member');
+      const channel = await channels.create({
+        serverId,
+        name: 'general',
+        isPrivate: false,
+      });
+      await channelOverrides.revoke(channel.id, 'member', 'post');
+
+      await expect(
+        service.getChannelCapabilities(channel, OTHER_USER_ID),
+      ).resolves.toEqual(['view']);
+    });
+  });
+
   describe('listAccessibleChannels', () => {
     /** A server owned by OWNER_ID, optionally seating OTHER_USER_ID in `role`. */
     async function seedOwned(name: string, role?: Role): Promise<bigint> {

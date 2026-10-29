@@ -19,7 +19,7 @@ import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
 import { InviteDialog } from '@/components/servers/InviteDialog';
 import { useContextMenu } from '@/hooks/useContextMenu';
-import { useMyRole } from '@/hooks/useMyRole';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface Server {
@@ -43,7 +43,7 @@ export function ServerList() {
   const [createIconUrl, setCreateIconUrl] = useState('');
   const [creating, setCreating] = useState(false);
   const serverMenu = useContextMenu<Server>();
-  const menuServerRole = useMyRole(serverMenu.state?.target.id ?? null);
+  const menuPermissions = useMyPermissions(serverMenu.state?.target.id ?? null);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [inviteDialogServerId, setInviteDialogServerId] = useState<string | null>(null);
 
@@ -292,7 +292,7 @@ export function ServerList() {
                 Server Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              {menuServerRole === 'owner' && (
+              {menuPermissions.hasRole('owner') && (
                 <DropdownMenuItem
                   onClick={() => handleDeleteServer(serverMenu.state!.target.id)}
                   className="text-accent-warn focus:text-accent-warn"

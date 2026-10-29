@@ -6,6 +6,7 @@ import {
 import { useServerStore } from '@/stores/serverStore';
 import { useMembershipStore } from '@/stores/membershipStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { toast } from '@/stores/toastStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,8 +75,8 @@ export function ServerSettings() {
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const myRole = entry?.verified ? members.find((m) => m.userId === user?.id)?.role ?? null : null;
-  const isOwner = myRole === 'owner';
+  const permissions = useMyPermissions(serverId || null);
+  const isOwner = permissions.hasRole('owner');
 
   const loadMembers = useCallback(async () => {
     if (!serverId) return;
@@ -381,7 +382,7 @@ export function ServerSettings() {
             <div>
               <h1 className="text-xl font-semibold text-text-primary mb-1">Invites</h1>
               <p className="text-text-muted text-sm mb-6">One invite link per server. Regenerate to invalidate the old one.</p>
-              <InvitePanel serverId={serverId} canManage={isOwner || myRole === 'moderator'} />
+              <InvitePanel serverId={serverId} canManage={permissions.hasRole('owner', 'moderator')} />
             </div>
           )}
 

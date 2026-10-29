@@ -22,6 +22,8 @@ import { useState } from 'react';
 import { MemberManagementDrawer } from '@/components/channels/MemberManagementDrawer';
 import { OverridesDrawer } from '@/components/channels/OverridesDrawer';
 import { useContextMenu } from '@/hooks/useContextMenu';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
+import { useServerStore } from '@/stores/serverStore';
 
 interface Channel {
   id: string;
@@ -34,7 +36,9 @@ interface Channel {
 export function ChannelList() {
   const params = useParams({ strict: false }) as { serverId?: string };
   const serverId = params.serverId;
+  const servers = useServerStore((state) => state.servers);
   const { channelsByServer, currentChannelId, createChannel, deleteChannel, updateChannel } = useChannelStore();
+  const permissions = useMyPermissions(serverId ?? null);
   const { closeAllDrawers } = useUIStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -52,14 +56,21 @@ export function ChannelList() {
   const [showOverridesDrawer, setShowOverridesDrawer] = useState(false);
 
   const channels = serverId ? channelsByServer.get(serverId) ?? [] : [];
+  const server = servers.find((candidate) => candidate.id === serverId);
+  const canCreateChannel = Boolean(permissions.confirmed && server && (
+    server.channelCreationPolicy === 'everyone' ||
+    (server.channelCreationPolicy === 'mods_only' && permissions.hasRole('owner', 'moderator')) ||
+    (server.channelCreationPolicy === 'owner_only' && permissions.hasRole('owner'))
+  ));
+  const canCreatePrivate = permissions.hasRole('owner', 'moderator');
 
   const handleCreateChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createName.trim() || !serverId) return;
+    if (!createName.trim() || !serverId || !canCreateChannel) return;
     
     setCreating(true);
     try {
-      await createChannel(serverId, { name: createName.trim(), isPrivate: createIsPrivate });
+      await createChannel(serverId, { name: createName.trim(), isPrivate: createIsPrivate && canCreatePrivate });
       setShowCreateDialog(false);
       setCreateName('');
       setCreateIsPrivate(false);
@@ -72,7 +83,7 @@ export function ChannelList() {
 
   const handleEditChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editName.trim() || !activeChannel) return;
+    if (!editName.trim() || !activeChannel || !permissions.canInChannel(activeChannel.id, 'manage_settings')) return;
     
     setEditing(true);
     try {
@@ -133,7 +144,7 @@ export function ChannelList() {
     )}>
       <div className="flex h-16 items-center justify-between px-4 border-b border-border-subtle">
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-wider">Channels</h2>
-        <Button 
+        {canCreateChannel && <Button
           variant="ghost" 
           size="icon" 
           onClick={() => setShowCreateDialog(true)}
@@ -141,14 +152,14 @@ export function ChannelList() {
           aria-label="Create channel"
         >
           <Plus className="h-4 w-4" />
-        </Button>
+        </Button>}
       </div>
       
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-1" role="navigation" aria-label="Channels">
         {channels.length === 0 ? (
           <div className="px-4 py-4 text-center">
             <p className="text-text-muted text-sm">No channels yet</p>
-            <Button 
+            {canCreateChannel && <Button
               variant="primary" 
               size="sm" 
               className="mt-2 w-full"
@@ -156,7 +167,7 @@ export function ChannelList() {
             >
               <Plus className="h-4 w-4 mr-1" />
               Create Channel
-            </Button>
+            </Button>}
           </div>
         ) : (
           channels.map((channel) => (
@@ -175,7 +186,7 @@ export function ChannelList() {
                         : 'text-text-secondary hover:text-text-primary'
                     )}
                     onClick={() => closeAllDrawers()}
-                    {...channelMenu.triggerProps(channel)}
+                    {...(permissions.canInChannel(channel.id, 'manage_settings') ? channelMenu.triggerProps(channel) : {})}
                   >
                     {channel.isPrivate ? (
                       <Lock className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
@@ -191,7 +202,7 @@ export function ChannelList() {
               </Tooltip>
 
               {/* Visible affordance — kebab opens the same menu as right-click */}
-              <Button
+              {permissions.canInChannel(channel.id, 'manage_settings') && <Button
                 variant="ghost"
                 size="icon"
                 className={cn(
@@ -207,14 +218,14 @@ export function ChannelList() {
                 }}
               >
                 <MoreVertical className="h-3.5 w-3.5" />
-              </Button>
+              </Button>}
             </div>
           ))
         )}
       </nav>
 
       <div className="p-2 border-t border-border-subtle">
-        <Button 
+        {canCreateChannel && <Button
           variant="ghost" 
           size="sm" 
           className="w-full text-text-secondary hover:text-text-primary"
@@ -222,10 +233,10 @@ export function ChannelList() {
         >
           <Plus className="h-4 w-4 mr-2" />
           Create Channel
-        </Button>
+        </Button>}
       </div>
 
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog && canCreateChannel} onOpenChange={setShowCreateDialog}>
         <DialogContent className="max-w-md">
           <DialogTitle>Create Channel</DialogTitle>
           <DialogDescription>Give your channel a name and choose type</DialogDescription>
@@ -245,7 +256,7 @@ export function ChannelList() {
                   autoFocus
                 />
               </div>
-              <div className="flex items-center gap-2">
+              {canCreatePrivate && <div className="flex items-center gap-2">
                 <Checkbox
                   id="channel-private"
                   checked={createIsPrivate}
@@ -254,7 +265,7 @@ export function ChannelList() {
                 <Label htmlFor="channel-private" className="text-sm text-text-primary cursor-pointer">
                   Private Channel
                 </Label>
-              </div>
+              </div>}
             </div>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setShowCreateDialog(false)}>
@@ -268,7 +279,7 @@ export function ChannelList() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showEditDialog} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setActiveChannel(null); }}>
+      <Dialog open={showEditDialog && Boolean(activeChannel && permissions.canInChannel(activeChannel.id, 'manage_settings'))} onOpenChange={(open) => { setShowEditDialog(open); if (!open) setActiveChannel(null); }}>
         <DialogContent className="max-w-md">
           <DialogTitle>Edit Channel</DialogTitle>
           <DialogDescription>Update channel name and type</DialogDescription>
@@ -315,7 +326,7 @@ export function ChannelList() {
         open={channelMenu.state !== null}
         onOpenChange={(open) => { if (!open) channelMenu.close(); }}
       >
-        {channelMenu.state && (
+        {channelMenu.state && permissions.canInChannel(channelMenu.state.target.id, 'manage_settings') && (
           <>
             {/* Radix 2.x has no virtual anchor; a 1px fixed trigger at the
                 pointer gives the menu its position. */}
@@ -374,6 +385,7 @@ export function ChannelList() {
         open={showOverridesDrawer}
         onOpenChange={(open) => { setShowOverridesDrawer(open); if (!open) setActiveChannel(null); }}
         channelId={activeChannel?.id ?? ''}
+        serverId={serverId ?? ''}
       />
     </div>
   );

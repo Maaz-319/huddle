@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/stores/toastStore';
 import { useChannelStore } from '@/stores/channelStore';
+import { useMyPermissions } from '@/hooks/useMyPermissions';
 import { useMembershipStore } from '@/stores/membershipStore';
 import type { ChannelMemberResponse } from '@/types/channel';
 import type { MemberView } from '@/stores/membershipStore';
@@ -39,6 +40,8 @@ interface MemberManagementDrawerProps {
 }
 
 export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId }: MemberManagementDrawerProps) {
+  const permissions = useMyPermissions(serverId, channelId || null);
+  const canManage = permissions.can('manage_settings');
   const { listChannelMembers, addChannelMember, removeChannelMember } = useChannelStore();
   const serverEntry = useMembershipStore((state) => state.byServer[serverId]);
   const refreshServerMembers = useMembershipStore((state) => state.refresh);
@@ -75,11 +78,15 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
   }, [channelId, serverId, listChannelMembers, refreshServerMembers]);
 
   useEffect(() => {
-    if (open) {
+    if (open && canManage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       loadAll();
     }
-  }, [open, loadAll]);
+  }, [open, canManage, loadAll]);
+
+  useEffect(() => {
+    if (open && !canManage) onOpenChange(false);
+  }, [canManage, onOpenChange, open]);
 
   const availableUsers = useMemo(
     () => serverMembers.filter((u) => !channelMembers.some((m) => m.userId === u.userId)),
@@ -91,6 +98,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
   );
 
   const handleAddMember = async (userId: string) => {
+    if (!canManage) return;
     setAdding(userId);
     try {
       await addChannelMember(channelId, userId);
@@ -104,6 +112,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
   };
 
   const handleRemoveMember = async (userId: string) => {
+    if (!canManage) return;
     if (!confirm('Remove this member from the channel?')) return;
     
     setRemoving(userId);
@@ -119,7 +128,7 @@ export function MemberManagementDrawer({ open, onOpenChange, channelId, serverId
   };
 
   return (
-    <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
+    <RadixDialog.Root open={open && canManage} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
         <RadixDialog.Content className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md bg-bg-raised border-l border-border-subtle shadow-xl flex flex-col outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right">
