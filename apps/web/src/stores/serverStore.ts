@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { apiClient } from '@/api/client';
 import type { ServerResponse, InviteResponse } from '@/types/server';
-import type { ServerRole } from '@/types/channel';
+import { useMembershipStore } from './membershipStore';
 
 interface ServerStore {
   servers: ServerResponse[];
@@ -9,7 +9,6 @@ interface ServerStore {
   loading: boolean;
   hasFetched: boolean;
   error: string | null;
-  myRolesByServer: Record<string, ServerRole>;
   
   fetchServers: () => Promise<void>;
   createServer: (name: string, iconUrl?: string | null) => Promise<ServerResponse>;
@@ -34,7 +33,6 @@ interface ServerStore {
   revokeInvite: (serverId: string) => Promise<void>;
   regenerateInvite: (serverId: string) => Promise<InviteResponse>;
   setCurrentServerId: (id: string | null) => void;
-  setMyRole: (serverId: string, role: ServerRole) => void;
 }
 
 export const useServerStore = create<ServerStore>((set) => ({
@@ -43,7 +41,6 @@ export const useServerStore = create<ServerStore>((set) => ({
   loading: false,
   hasFetched: false,
   error: null,
-  myRolesByServer: {},
   
   fetchServers: async () => {
     set({ loading: true, hasFetched: false, error: null });
@@ -67,22 +64,22 @@ export const useServerStore = create<ServerStore>((set) => ({
 
   deleteServer: async (serverId) => {
     await apiClient.delete(`/servers/${serverId}`);
+    useMembershipStore.getState().remove(serverId);
     set((state) => ({
       servers: state.servers.filter((s) => s.id !== serverId),
       currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
     }));
   },
 
-  removeServer: (serverId) =>
+  removeServer: (serverId) => {
+    useMembershipStore.getState().remove(serverId);
     set((state) => {
-      const myRolesByServer = { ...state.myRolesByServer };
-      delete myRolesByServer[serverId];
       return {
         servers: state.servers.filter((s) => s.id !== serverId),
         currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
-        myRolesByServer,
       };
-    }),
+    });
+  },
 
   updateServer: async (serverId, data) => {
     const server = await apiClient.patch<ServerResponse>(`/servers/${serverId}`, data);
@@ -94,10 +91,12 @@ export const useServerStore = create<ServerStore>((set) => ({
 
   updateMemberRole: async (serverId, userId, role) => {
     await apiClient.patch(`/servers/${serverId}/members/${userId}/role`, { role });
+    useMembershipStore.getState().invalidate(serverId);
   },
 
   transferOwnership: async (serverId, toUserId) => {
     await apiClient.post(`/servers/${serverId}/transfer-ownership`, { toUserId });
+    useMembershipStore.getState().invalidate(serverId);
   },
 
   getInvite: async (serverId) => {
@@ -114,8 +113,4 @@ export const useServerStore = create<ServerStore>((set) => ({
 
   setCurrentServerId: (id) => set({ currentServerId: id }),
 
-  setMyRole: (serverId, role) =>
-    set((state) => ({
-      myRolesByServer: { ...state.myRolesByServer, [serverId]: role },
-    })),
 }));

@@ -341,6 +341,90 @@ describe('live access revocation and grants over the socket (e2e)', () => {
     return { ownerSocket, memberSocket, modSocket };
   }
 
+  it('notifies every connected member after a role change and ownership transfer', async () => {
+    const seeded = await seed();
+    const { ownerSocket, memberSocket, modSocket } = await connectAll(seeded);
+    const notices = [ownerSocket, memberSocket, modSocket].map((socket) =>
+      collect<{ serverId: string }>(socket, 'membership_changed'),
+    );
+    const memberId = await userIdOf(MEMBER.githubId);
+    const promote = await seeded.owner.agent
+      .patch(`/servers/${seeded.serverId}/members/${memberId}/role`)
+      .send({ role: 'moderator' });
+    expect(promote.status).toBe(200);
+    await waitUntil(
+      () => notices.every((items) => items.length === 1),
+      'role notices',
+    );
+    expect(notices).toEqual(
+      Array.from({ length: 3 }, () => [{ serverId: seeded.serverId }]),
+    );
+
+    await resetBudget('strict-mutation');
+    const transfer = await seeded.owner.agent
+      .post(`/servers/${seeded.serverId}/transfer-ownership`)
+      .send({ toUserId: memberId });
+    expect(transfer.status).toBe(204);
+    await waitUntil(
+      () => notices.every((items) => items.length === 2),
+      'transfer notices',
+    );
+    expect(
+      notices.every((items) => items[1].serverId === seeded.serverId),
+    ).toBe(true);
+  });
+
+  it('notifies existing members and seats an already connected joiner', async () => {
+    const owner = await logIn(OWNER);
+    const joiner = await logIn(MEMBER);
+    const outsider = await logIn(MOD);
+    const serverId = idOf(
+      (await owner.agent.post('/servers').send({ name: 'Join Notices' })).body,
+    );
+    await resetBudget('strict-mutation');
+    const channelId = idOf(
+      (
+        await owner.agent
+          .post(`/servers/${serverId}/channels`)
+          .send({ name: 'lobby', isPrivate: false })
+      ).body,
+    );
+    const invite = await owner.agent.get(`/servers/${serverId}/invite`);
+    const code = (invite.body as { code: string }).code;
+    const [ownerSocket, joinerSocket, outsiderSocket] = await Promise.all([
+      connect(owner.cookie),
+      connect(joiner.cookie),
+      connect(outsider.cookie),
+    ]);
+    const ownerNotices = collect<{ serverId: string }>(
+      ownerSocket,
+      'membership_changed',
+    );
+    const joinerNotices = collect<{ serverId: string }>(
+      joinerSocket,
+      'membership_changed',
+    );
+    const outsiderNotices = collect<{ serverId: string }>(
+      outsiderSocket,
+      'membership_changed',
+    );
+    const joinedChannel = nextEvent<ChannelNotice>(
+      joinerSocket,
+      'channel_added',
+    );
+    await resetBudget('strict-mutation');
+    const joined = await joiner.agent.post(`/invites/${code}/join`).send();
+    expect(joined.status).toBe(200);
+    expect(await joinedChannel).toEqual({ channelId });
+    await waitUntil(
+      () => ownerNotices.length === 1 && joinerNotices.length === 1,
+      'join notices',
+    );
+    expect(ownerNotices).toEqual([{ serverId }]);
+    expect(joinerNotices).toEqual([{ serverId }]);
+    expect(outsiderNotices).toEqual([]);
+  });
+
   it('removing a seat from a private channel: the channel disappears, silence there, the connection and the rest survive', async () => {
     const seeded = await seed();
     const { ownerSocket, memberSocket } = await connectAll(seeded);

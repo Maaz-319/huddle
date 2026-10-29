@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/components/ui/cn';
 import { MoreVertical, Edit, Trash2, Copy, X, AlertCircle } from 'lucide-react';
 import {
@@ -32,6 +32,14 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
   const isDeleted = message.isDeleted === true;
   const isPending = message.pending === true;
   const isFailed = message.failed === true;
+  const [expiryTick, setExpiryTick] = useState(0);
+  useEffect(() => {
+    if (!message.uncertain || !message.retryExpiresAt) return;
+    const wait = message.retryExpiresAt - Date.now();
+    const timer = window.setTimeout(() => setExpiryTick((tick) => tick + 1), Math.max(0, wait) + 25);
+    return () => window.clearTimeout(timer);
+  }, [message.uncertain, message.retryExpiresAt]);
+  const requiresResend = message.uncertain && (!message.retryExpiresAt || expiryTick > 0);
 
   const handleSaveEdit = async () => {
     if (!onEdit || !editContent.trim() || editContent === message.content) {
@@ -178,13 +186,13 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
         {isFailed && !isEditing && (
           <div className="flex items-center gap-2 mt-1 text-xs text-accent-warn">
             <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-            <span>Failed to send.</span>
+            <span>{message.uncertain ? 'Delivery is uncertain.' : 'Failed to send.'}</span>
             {onRetry && (
               <button
                 onClick={() => onRetry(message.id)}
                 className="underline hover:text-text-primary transition-colors"
               >
-                Retry
+                {requiresResend ? 'Resend' : 'Retry'}
               </button>
             )}
             {onDiscard && (
@@ -228,7 +236,7 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
                   Copy text
                 </DropdownMenuItem>
               )}
-              {isOwn && !isFailed && (
+              {isOwn && !isFailed && !isPending && (
                 <DropdownMenuItem
                   onClick={() => {
                     setIsEditing(true);
@@ -240,8 +248,8 @@ export function Message({ message, isOwn, canDeleteOthers = false, onEdit, onDel
                   Edit
                 </DropdownMenuItem>
               )}
-              {isOwn && !isFailed && <DropdownMenuSeparator />}
-              {(isOwn || canDeleteOthers) && (
+              {isOwn && !isFailed && !isPending && <DropdownMenuSeparator />}
+              {(isOwn || canDeleteOthers) && !isFailed && !isPending && (
                 <DropdownMenuItem
                   onClick={() => onDelete?.(message.id)}
                   className="flex items-center gap-2 text-red-400 focus:text-red-300"

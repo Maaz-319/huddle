@@ -21,6 +21,11 @@ export interface MessageResponse {
   // Client-side only fields for optimistic updates
   pending?: boolean;
   failed?: boolean;
+  uncertain?: boolean;
+  /** Local deadline after which a retry requires an explicit resend warning. */
+  retryExpiresAt?: number;
+  /** Present only on the originating socket's message_create event. */
+  idempotencyKey?: string;
 }
 
 export interface MessageDeleteResponse {
@@ -47,6 +52,10 @@ export interface ChannelAdded {
 
 export interface ChannelRemoved {
   channelId: string;
+}
+
+export interface MembershipChanged {
+  serverId: string;
 }
 
 export interface PolicyViolation {
@@ -110,6 +119,7 @@ export type ServerEvent =
   | { type: 'presence_offline'; payload: PresenceOffline }
   | { type: 'channel_added'; payload: ChannelAdded }
   | { type: 'channel_removed'; payload: ChannelRemoved }
+  | { type: 'membership_changed'; payload: MembershipChanged }
   | { type: 'policy_violation'; payload: PolicyViolation };
 
 export type ClientEvent =
@@ -131,6 +141,7 @@ export type ServerEventMap = {
   presence_offline: PresenceOffline;
   channel_added: ChannelAdded;
   channel_removed: ChannelRemoved;
+  membership_changed: MembershipChanged;
   policy_violation: PolicyViolation;
 };
 

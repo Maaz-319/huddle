@@ -14,6 +14,7 @@ import {
   ValidationError,
 } from '../common/errors';
 import {
+  MEMBERSHIP_CHANGED,
   SERVER_ACCESS_CHANGED,
   ServerAccessChanged,
   USER_ACCESS_CHANGED,
@@ -309,6 +310,8 @@ export class AdministrationService {
         userId,
         role: 'member',
       });
+      this.events.emit(MEMBERSHIP_CHANGED, { serverId: server.id });
+      this.events.emit(USER_ACCESS_CHANGED, { userId });
     }
 
     return server;
@@ -383,6 +386,7 @@ export class AdministrationService {
     this.events.emit(USER_ACCESS_CHANGED, {
       userId: targetUserId,
     } satisfies UserAccessChanged);
+    this.events.emit(MEMBERSHIP_CHANGED, { serverId });
 
     return membership;
   }
@@ -414,6 +418,7 @@ export class AdministrationService {
     this.events.emit(SERVER_ACCESS_CHANGED, {
       serverId,
     } satisfies ServerAccessChanged);
+    this.events.emit(MEMBERSHIP_CHANGED, { serverId });
   }
 
   /**

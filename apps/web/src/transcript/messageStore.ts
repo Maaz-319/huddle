@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import type { MessageResponse } from '@/types/socket';
 
-interface PendingMessage {
+export interface PendingMessage {
   idempotencyKey: string;
   message: MessageResponse;
+  attemptedAt: number;
+  autoRetried: boolean;
+  transport: 'socket' | 'rest';
 }
 
 interface MessageStore {
@@ -12,6 +15,8 @@ interface MessageStore {
   pendingMessages: Map<string, PendingMessage>;
   hasMoreByChannel: Map<string, boolean>;
   loadingByChannel: Map<string, boolean>;
+  errorByChannel: Map<string, string>;
+  gapByChannel: Map<string, boolean>;
   currentChannelId: string | null;
 
   setCurrentChannelId: (channelId: string | null) => void;
@@ -22,16 +27,24 @@ interface MessageStore {
   updateMessage: (channelId: string, message: MessageResponse) => void;
   removeMessage: (channelId: string, messageId: string) => void;
   clearChannel: (channelId: string) => void;
+  replaceRecent: (channelId: string, messages: MessageResponse[], hasMore: boolean, retainedAfter: string | null) => void;
   getMessages: (channelId: string) => MessageResponse[];
   setHasMore: (channelId: string, hasMore: boolean) => void;
   getHasMore: (channelId: string) => boolean;
   setLoading: (channelId: string, loading: boolean) => void;
   getLoading: (channelId: string) => boolean;
+  setError: (channelId: string, error: string | null) => void;
+  getError: (channelId: string) => string | null;
+  setGap: (channelId: string, gap: boolean) => void;
+  getGap: (channelId: string) => boolean;
 
   // Optimistic updates
-  addPendingMessage: (idempotencyKey: string, message: MessageResponse) => void;
+  addPendingMessage: (idempotencyKey: string, message: MessageResponse, transport: 'socket' | 'rest') => void;
   resolvePendingMessage: (idempotencyKey: string, message: MessageResponse) => void;
   rejectPendingMessage: (idempotencyKey: string) => void;
+  markUncertain: (idempotencyKey: string) => void;
+  markRetrying: (idempotencyKey: string, automatic: boolean) => void;
+  removePendingMessage: (idempotencyKey: string) => void;
   getPendingMessage: (idempotencyKey: string) => PendingMessage | undefined;
 
   // Event handlers for real-time updates
@@ -137,6 +150,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   pendingMessages: new Map(),
   hasMoreByChannel: new Map(),
   loadingByChannel: new Map(),
+  errorByChannel: new Map(),
+  gapByChannel: new Map(),
   currentChannelId: null,
 
   setCurrentChannelId: (channelId) => set({ currentChannelId: channelId }),
@@ -213,7 +228,36 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       newHasMore.delete(channelId);
       const newLoading = new Map(state.loadingByChannel);
       newLoading.delete(channelId);
-      return { messagesByChannel: newMessages, lastMessageIds: newLastIds, hasMoreByChannel: newHasMore, loadingByChannel: newLoading };
+      const newErrors = new Map(state.errorByChannel);
+      newErrors.delete(channelId);
+      const newGaps = new Map(state.gapByChannel);
+      newGaps.delete(channelId);
+      const newPending = new Map(state.pendingMessages);
+      for (const [key, pending] of newPending) {
+        if (pending.message.channelId === channelId) newPending.delete(key);
+      }
+      return { messagesByChannel: newMessages, lastMessageIds: newLastIds, hasMoreByChannel: newHasMore, loadingByChannel: newLoading, errorByChannel: newErrors, gapByChannel: newGaps, pendingMessages: newPending };
+    }),
+
+  replaceRecent: (channelId, messages, hasMore, retainedAfter) =>
+    set((state) => {
+      const existing = state.messagesByChannel.get(channelId) ?? [];
+      // Preserve events that arrived while the HTTP request was in flight.
+      // On an initial load there was no cursor, so every existing row is new.
+      const retained = existing.filter((message) =>
+        !isSnowflakeId(message.id) ||
+        retainedAfter === null || BigInt(message.id) > BigInt(retainedAfter)
+      );
+      const rows = mergeBatch(retained, messages);
+      const nextMessages = new Map(state.messagesByChannel);
+      nextMessages.set(channelId, rows);
+      const nextLast = new Map(state.lastMessageIds);
+      const latest = newestSnowflakeIn(rows);
+      if (latest === null) nextLast.delete(channelId);
+      else nextLast.set(channelId, latest);
+      const nextHasMore = new Map(state.hasMoreByChannel);
+      nextHasMore.set(channelId, hasMore);
+      return { messagesByChannel: nextMessages, lastMessageIds: nextLast, hasMoreByChannel: nextHasMore };
     }),
 
   getMessages: (channelId) => {
@@ -242,10 +286,24 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     return get().loadingByChannel.get(channelId) ?? false;
   },
 
-  addPendingMessage: (idempotencyKey, message) =>
+  setError: (channelId, error) => set((state) => {
+    const next = new Map(state.errorByChannel);
+    if (error === null) next.delete(channelId);
+    else next.set(channelId, error);
+    return { errorByChannel: next };
+  }),
+  getError: (channelId) => get().errorByChannel.get(channelId) ?? null,
+  setGap: (channelId, gap) => set((state) => {
+    const next = new Map(state.gapByChannel);
+    next.set(channelId, gap);
+    return { gapByChannel: next };
+  }),
+  getGap: (channelId) => get().gapByChannel.get(channelId) ?? false,
+
+  addPendingMessage: (idempotencyKey, message, transport) =>
     set((state) => {
       const newPendingMap = new Map(state.pendingMessages);
-      newPendingMap.set(idempotencyKey, { idempotencyKey, message });
+      newPendingMap.set(idempotencyKey, { idempotencyKey, message, attemptedAt: Date.now(), autoRetried: false, transport });
 
       // Optimistic rows live in the visible transcript, not a side channel —
       // otherwise nothing appears until the ack lands. The newest row
@@ -316,23 +374,64 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       return { messagesByChannel: newMessagesMap, pendingMessages: newPendingMap };
     }),
 
+  markUncertain: (idempotencyKey) => set((state) => {
+    const pending = state.pendingMessages.get(idempotencyKey);
+    if (!pending) return state;
+    const rows = state.messagesByChannel.get(pending.message.channelId) ?? [];
+    const nextRows = rows.map((row) => row.id === pending.message.id
+      ? { ...row, pending: false, failed: true, uncertain: true }
+      : row);
+    const next = new Map(state.messagesByChannel);
+    next.set(pending.message.channelId, nextRows);
+    return { messagesByChannel: next };
+  }),
+
+  markRetrying: (idempotencyKey, automatic) => set((state) => {
+    const pending = state.pendingMessages.get(idempotencyKey);
+    if (!pending) return state;
+    const nextPending = new Map(state.pendingMessages);
+    nextPending.set(idempotencyKey, { ...pending, autoRetried: pending.autoRetried || automatic });
+    const rows = state.messagesByChannel.get(pending.message.channelId) ?? [];
+    const nextRows = rows.map((row) => row.id === pending.message.id
+      ? { ...row, pending: true, failed: false, uncertain: false }
+      : row);
+    const nextMessages = new Map(state.messagesByChannel);
+    nextMessages.set(pending.message.channelId, nextRows);
+    return { pendingMessages: nextPending, messagesByChannel: nextMessages };
+  }),
+
+  removePendingMessage: (idempotencyKey) => set((state) => {
+    const pending = state.pendingMessages.get(idempotencyKey);
+    if (!pending) return state;
+    const nextPending = new Map(state.pendingMessages);
+    nextPending.delete(idempotencyKey);
+    const nextMessages = new Map(state.messagesByChannel);
+    nextMessages.set(pending.message.channelId,
+      (state.messagesByChannel.get(pending.message.channelId) ?? []).filter((row) => row.id !== pending.message.id));
+    return { pendingMessages: nextPending, messagesByChannel: nextMessages };
+  }),
+
   getPendingMessage: (idempotencyKey) => {
     return get().pendingMessages.get(idempotencyKey);
   },
 
   onMessageCreate: (message) =>
     set((state) => {
-      // Only add if it's for the current channel
-      if (state.currentChannelId !== message.channelId) return state;
+      // Keep loaded background transcripts and correlated sends current too.
+      if (state.currentChannelId !== message.channelId &&
+          !state.messagesByChannel.has(message.channelId) &&
+          !state.pendingMessages.has(message.idempotencyKey ?? '')) return state;
 
       const existing = state.messagesByChannel.get(message.channelId) ?? [];
 
-      // The broadcast can beat the ack: if an optimistic copy of this exact
-      // message is still on screen, drop it (and its pending entry) so the
-      // confirmed row is the only one.
-      const optimisticIndex = existing.findIndex(
-        (m) => m.pending === true && m.authorId === message.authorId && m.content === message.content
-      );
+      // Only the sender's keyed broadcast may replace an optimistic row.
+      // Author and content are not unique, even for consecutive sends.
+      const correlated = message.idempotencyKey
+        ? state.pendingMessages.get(message.idempotencyKey)
+        : undefined;
+      const optimisticIndex = correlated
+        ? existing.findIndex((m) => m.id === correlated.message.id)
+        : -1;
       let cleaned = existing;
       let pendingKeyToRemove: string | null = null;
       if (optimisticIndex >= 0) {
@@ -346,18 +445,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
       }
 
+      const confirmed = { ...message };
+      delete confirmed.idempotencyKey;
       const index = cleaned.findIndex((m) => m.id === message.id);
       let updated: MessageResponse[];
 
       if (index >= 0) {
         // The confirmed broadcast for a message already on screen — server
         // wins: same id, but now with the real created stamp and a hydrated
-        // author.
+        // author, unless a local edit/delete is still in flight.
         updated = [...cleaned];
-        updated[index] = message;
+        if (!updated[index]?.pending) updated[index] = confirmed;
       } else {
         // New message → the END of the ascending transcript, never the top.
-        updated = [...cleaned, message];
+        updated = [...cleaned, confirmed];
       }
 
       const newMap = new Map(state.messagesByChannel);
@@ -406,6 +507,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ...updated[index],
         content: 'message deleted',
         isDeleted: true,
+        pending: false,
       } as MessageResponse;
       
       const newMap = new Map(state.messagesByChannel);

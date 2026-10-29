@@ -6,7 +6,8 @@ import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSocket } from '@/hooks/useSocket';
-import { useMessages, useTyping } from '@/hooks/useMessages';
+import { useTyping } from '@/hooks/useMessages';
+import { useChannelTranscript } from '@/transcript/channelTranscript';
 import { useMyRole } from '@/hooks/useMyRole';
 import { Button } from '@/components/ui/button';
 import { MessageList } from './MessageList';
@@ -30,13 +31,16 @@ export function MessagePane() {
     messages,
     hasMore,
     loading,
+    error,
+    gap,
+    retrySync,
     sendMessage,
     retryMessage,
     discardFailedMessage,
     editMessage,
     deleteMessage,
     loadOlder,
-  } = useMessages(currentChannelId);
+  } = useChannelTranscript(currentChannelId);
 
   const { startTyping, stopTyping, typingUsernames } = useTyping(currentChannelId);
   const myRole = useMyRole(params.serverId ?? null);
@@ -51,7 +55,7 @@ export function MessagePane() {
     : null;
 
   // Check if we should show empty state
-  const showEmptyState = !currentChannelId || (messages.length === 0 && !loading);
+  const showEmptyState = !currentChannelId || (messages.length === 0 && !loading && !error);
 
   const handleSend = useCallback(async (content: string) => {
     await sendMessage(content);
@@ -150,7 +154,22 @@ export function MessagePane() {
 
       {/* Message list */}
       <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col">
-        {showEmptyState && !loading ? (
+        {error && (
+          <div className="flex items-center justify-between gap-3 border-b border-accent-warn/40 bg-accent-warn/10 px-4 py-2 text-xs text-accent-warn" role="alert">
+            <span>{error}</span>
+            <button type="button" className="shrink-0 underline" onClick={() => void retrySync().catch(() => {})}>Retry</button>
+          </div>
+        )}
+        {gap && !error && (
+          <p className="border-b border-border-subtle bg-bg-raised px-4 py-2 text-center text-xs text-text-muted" role="status">
+            Latest messages loaded after a long gap. Scroll up to see older history.
+          </p>
+        )}
+        {error && messages.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-text-muted">
+            Messages are unavailable. Use Retry above to load this channel.
+          </div>
+        ) : showEmptyState && !loading ? (
           <EmptyMessages hasChannels />
         ) : (
           <>

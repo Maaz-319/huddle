@@ -428,7 +428,7 @@ describe('sending a message over the socket (e2e)', () => {
     // The sender's own broadcast loops back too — it is not suppressed; the
     // sender's UI just does not wait for it.
     const senderView = await memberReceives;
-    expect(senderView.id).toBe(success.messageId);
+    expect(senderView).toEqual({ ...ownerView, idempotencyKey: key });
 
     // And it is a real row, not an echo.
     await expect(rowsIn(seeded.alpha)).resolves.toBe(1);

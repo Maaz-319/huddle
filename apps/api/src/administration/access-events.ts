@@ -59,6 +59,16 @@ export const USER_ACCESS_CHANGED = 'user_access_changed';
 export const SERVER_ACCESS_CHANGED = 'server_access_changed';
 
 /**
+ * A durable server membership changed after invite join, role change, or
+ * ownership transfer. The gateway sends a small invalidation notice to
+ * connected server members; clients refetch the authoritative HTTP view.
+ */
+export const MEMBERSHIP_CHANGED = 'membership_changed';
+export interface MembershipChanged {
+  serverId: bigint;
+}
+
+/**
  * Payload for {@link USER_ACCESS_CHANGED}.
  *
  * `channelId` is present when the write names a channel (a seat change);

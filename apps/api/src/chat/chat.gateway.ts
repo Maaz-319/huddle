@@ -9,10 +9,12 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import {
+  MEMBERSHIP_CHANGED,
   SERVER_ACCESS_CHANGED,
   USER_ACCESS_CHANGED,
 } from '../administration/access-events';
 import type {
+  MembershipChanged,
   ServerAccessChanged,
   UserAccessChanged,
 } from '../administration/access-events';
@@ -101,6 +103,33 @@ export class ChatGateway implements OnGatewayConnection {
    * record.
    */
   private readonly escalated = new WeakSet<AuthenticatedSocket>();
+
+  @OnEvent(MEMBERSHIP_CHANGED)
+  async onMembershipChanged({ serverId }: MembershipChanged): Promise<void> {
+    const connectedUsers = new Set(
+      [...this.server.sockets.sockets.values()].map(
+        (socket) => socket.data.user.id,
+      ),
+    );
+    await Promise.all(
+      [...connectedUsers].map(async (userId) => {
+        try {
+          const servers = await this.administration.getUserServerIds(userId);
+          if (!servers.some((server) => server.id === serverId)) return;
+          for (const socketId of this.getSocketIdsForUser(userId)) {
+            this.reachSocket(socketId).emit('membership_changed', {
+              serverId: serverId.toString(),
+            });
+          }
+        } catch (error) {
+          this.logger.warn('ChatGateway', 'Membership notification failed', {
+            error: String(error),
+            userId: userId.toString(),
+          });
+        }
+      }),
+    );
+  }
 
   /**
    * The socket.io server Nest binds here once the adapter has created it.
@@ -448,17 +477,29 @@ export class ChatGateway implements OnGatewayConnection {
    * sender's UI updates from the direct ack, but its own broadcast is not
    * suppressed).
    *
-   * Called from two places — this gateway's own handler after a socket send,
-   * and the REST `POST` after the service write — because `ChatService` must
-   * not know that rooms exist and the controller must not either: two write
-   * paths were the whole point of routing both through `postMessage`, and a
-   * second emit path would undo it.
+   * Called from the gateway after a socket send and from the REST `POST`.
+   * The originating socket receives its nonce for exact optimistic-row
+   * reconciliation; every other viewer receives the ordinary message shape.
+   * REST has no nonce, so it broadcasts the ordinary shape to the room.
    *
    * The payload is already shaped (`MessageResponse`): REST passes the very
    * object it is returning, so the Snowflake decoding happens once per
    * message, not twice.
    */
-  broadcastCreate(channelId: bigint, message: MessageResponse): void {
+  broadcastCreate(
+    channelId: bigint,
+    message: MessageResponse,
+    sender?: AuthenticatedSocket,
+    idempotencyKey?: string,
+  ): void {
+    if (sender && idempotencyKey) {
+      sender.to(channelId.toString()).emit('message_create', message);
+      this.reachSocket(sender.id).emit('message_create', {
+        ...message,
+        idempotencyKey,
+      });
+      return;
+    }
     this.server.to(channelId.toString()).emit('message_create', message);
   }
 
@@ -559,7 +600,12 @@ export class ChatGateway implements OnGatewayConnection {
         messageId: response.id,
         createdAt: response.createdAt,
       });
-      this.broadcastCreate(frame.channelId, response);
+      this.broadcastCreate(
+        frame.channelId,
+        response,
+        socket,
+        frame.idempotencyKey,
+      );
     } catch (error) {
       // A domain refusal is an answered question, not a fault; anything else
       // is a bug and belongs in the log with its stack.
