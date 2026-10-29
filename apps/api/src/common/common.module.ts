@@ -1,5 +1,5 @@
 import { Global, Module, ValidationPipe } from '@nestjs/common';
-import { APP_FILTER, APP_PIPE, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_PIPE, APP_INTERCEPTOR } from '@nestjs/core';
 import { DomainExceptionFilter } from './domain-exception.filter';
 import { PrismaService } from './prisma.service';
 import { RedisService } from './redis.service';
@@ -7,6 +7,7 @@ import { SnowflakeService } from './snowflake.service';
 import { validationExceptionFactory } from './validation-exception.factory';
 import { LoggerService } from './logger.service';
 import { CorrelationIdInterceptor } from './correlation-id.interceptor';
+import { RequestOriginGuard } from './request-origin.guard';
 
 /**
  * Shared primitives every other module may depend on. Global, so a feature
@@ -35,6 +36,7 @@ import { CorrelationIdInterceptor } from './correlation-id.interceptor';
     },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: CorrelationIdInterceptor },
+    { provide: APP_GUARD, useClass: RequestOriginGuard },
   ],
   exports: [PrismaService, RedisService, SnowflakeService, LoggerService],
 })

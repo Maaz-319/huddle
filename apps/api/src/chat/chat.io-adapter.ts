@@ -13,9 +13,10 @@ import { LoggerService } from '../common/logger.service';
 import { resolveClientIp } from '../common/trust-proxy';
 import { RateLimiterService } from '../rate-limiter/rate-limiter.service';
 
-/** What the handshake puts on every socket — identity and address, from the handshake only. */
+/** Identity, session, and address captured from the authenticated handshake. */
 export interface SocketIdentity {
   user: User;
+  sessionId: string;
 
   /**
    * The client's address as `req.ip` would resolve it (same `trust proxy`
@@ -135,6 +136,15 @@ export class ChatIoAdapter extends IoAdapter {
     const sessions = this.nestApp.get(SessionMiddleware, { strict: false });
     const users = this.nestApp.get(UserRepository, { strict: false });
     const hops = config.get('TRUSTED_PROXY_HOPS', { infer: true });
+    const webOrigin = config.get('WEB_ORIGIN', { infer: true });
+
+    server.use((socket, next) => {
+      if (socket.request.headers.origin !== webOrigin) {
+        next(new ConnectError('Origin not allowed', { code: 'REFUSED' }));
+        return;
+      }
+      next();
+    });
 
     // Rate limit before session resolution, exactly as the issue sequences
     // them: an unauthenticated flood must not cost a Redis session lookup
@@ -196,11 +206,12 @@ export class ChatIoAdapter extends IoAdapter {
     users: UserRepository,
   ): Promise<void> {
     try {
-      const userId = await sessions.handshakeUserId(socket.request);
-      const user = await resolveSessionUser(users, userId);
+      const session = await sessions.handshakeSession(socket.request);
+      const user = await resolveSessionUser(users, session.userId);
 
       // Identity comes from the handshake and only from the handshake.
       socket.data.user = user;
+      socket.data.sessionId = session.sessionId;
       next();
     } catch (error) {
       if (error instanceof UnauthorizedError) {

@@ -15,6 +15,12 @@ export interface UserResponse {
 
 export type MeResponse = UserResponse;
 
+/** Public profile fields used to label another user in member lists/messages. */
+export type UserSummaryResponse = Pick<
+  UserResponse,
+  'id' | 'username' | 'avatarUrl' | 'bio'
+>;
+
 export interface ServerResponse {
   id: string;
   name: string;

@@ -183,7 +183,7 @@ describe('typing indicators over the socket (e2e)', () => {
   function connect(cookie: string): Promise<Socket> {
     return new Promise((resolve, reject) => {
       const socket = io(baseUrl, {
-        extraHeaders: { Cookie: cookie },
+        extraHeaders: { Cookie: cookie, Origin: 'http://localhost:5173' },
         reconnection: false,
       });
       socket.once('connect', () => {

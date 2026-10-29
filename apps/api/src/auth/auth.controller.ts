@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { EnvironmentVariables } from '../common/env.validation';
@@ -22,7 +23,8 @@ import { SessionAuthGuard } from './session-auth.guard';
 import { ParseSnowflakeArrayPipe } from '../common/parse-snowflake-array.pipe';
 import { UpdateBioDto } from './update-bio.dto';
 import type { User } from './user-repository.interface';
-import type { MeResponse } from '@huddle/contracts';
+import type { MeResponse, UserSummaryResponse } from '@huddle/contracts';
+import { SESSION_REVOKED, USER_SESSIONS_REVOKED } from './session-events';
 
 function toMeResponse(user: User): MeResponse {
   return {
@@ -60,6 +62,7 @@ export class AuthController {
   constructor(
     private readonly config: ConfigService<EnvironmentVariables, true>,
     private readonly authService: AuthService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -94,6 +97,15 @@ export class AuthController {
       return;
     }
 
+    // OAuth state has already been verified by Passport. Rotate the anonymous
+    // pre-login session before assigning the authenticated identity.
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((err) =>
+        err
+          ? reject(err instanceof Error ? err : new Error(String(err)))
+          : resolve(),
+      );
+    });
     req.session.userId = user.id.toString();
     await new Promise<void>((resolve, reject) => {
       req.session.save((err) =>
@@ -139,8 +151,10 @@ export class AuthController {
   @Post('logout')
   @UseGuards(SessionAuthGuard)
   @RateLimit('read')
-  logout(@Req() req: Request, @Res() res: Response): Promise<void> {
-    return endSession(req, res);
+  async logout(@Req() req: Request, @Res() res: Response): Promise<void> {
+    const sessionId = req.sessionID;
+    await endSession(req, res);
+    this.events.emit(SESSION_REVOKED, { sessionId });
   }
 
   /**
@@ -158,6 +172,7 @@ export class AuthController {
     @Res() res: Response,
   ): Promise<void> {
     await this.authService.markDeleted(user.id);
+    this.events.emit(USER_SESSIONS_REVOKED, { userId: user.id });
     await endSession(req, res);
   }
 
@@ -173,8 +188,13 @@ export class AuthController {
   @RateLimit('read')
   async getUsers(
     @Query('ids', ParseSnowflakeArrayPipe) ids: bigint[],
-  ): Promise<MeResponse[]> {
+  ): Promise<UserSummaryResponse[]> {
     const users = await this.authService.findByIds(ids);
-    return users.map(toMeResponse);
+    return users.map((user) => ({
+      id: user.id.toString(),
+      username: user.username,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+    }));
   }
 }

@@ -30,6 +30,7 @@ Out of scope (this doc): the RBAC *data model* (role definitions, channel overri
 - **Profile provisioning (first login):** creates a user record from GitHub's `id` (source of truth, immutable), `login` (username), `avatar_url`, and email.
 - **Profile re-sync (every login):** username, avatar, and email are re-fetched and overwritten from GitHub on each login — Huddle never lets a user set a different handle locally. GitHub's numeric `id` is the durable key; if a GitHub username changes, Huddle's copy updates on next login.
 - **Email:** captured and stored from first login, but **not used for anything yet** (no verification flow, no notifications) — reserved for a possible future email module.
+- **Bulk public profile lookup:** `GET /auth/users` returns only id, username, avatar, and bio to signed-in users. Email remains available only through the caller's own `GET /auth/me` response.
 - **GitHub token retention:** the GitHub access token is used once to fetch the profile, then **discarded** — not persisted, since nothing else in Huddle calls the GitHub API.
 - **OAuth failure/denial:** if the user denies the GitHub prompt or GitHub returns an error, redirect to the login page with an error message. No retry-flow beyond letting the user click "log in" again.
 
@@ -40,9 +41,10 @@ Out of scope (this doc): the RBAC *data model* (role definitions, channel overri
 - **Cookie:** `Secure`, `HttpOnly`, `SameSite=Lax`. Lax (not Strict) because the OAuth callback redirect from GitHub is a top-level navigation that must still carry the cookie.
 - **Contents:** an **opaque session ID** — not a JWT. A JWT can't be revoked before its own expiry, which conflicts with real logout and sliding expiry.
 - **Storage:** server-side session store in **Redis** (same Redis instance already used by the rate limiter — see [CompleteApp.md §4.1](./CompleteApp.md)), keyed by session ID → `{ userId, createdAt, lastSeenAt, expiresAt }`.
-- **Expiry:** **sliding 7-day window** — each authenticated request/heartbeat extends `expiresAt` by 7 days from now (up to some cap, not yet numerically bounded beyond the 7-day rule). After 7 days of inactivity, the session is gone and the user must re-login.
+- **Expiry:** **sliding 7-day window** — each authenticated REST request extends the Redis session by 7 days. WebSocket transport heartbeats check the session but do not extend it; after 7 days without an authenticated REST request, the session expires and its sockets close.
 - **Expired/invalid session mid-use:** protected endpoints return `401`; the frontend redirects to the login page. No silent re-auth.
-- **CSRF on state-changing requests:** relying on `SameSite=Lax` alone for now. Explicit CSRF tokens on mutating endpoints (POST/PATCH/DELETE) are a deferred hardening step, not built in this phase.
+- **CSRF on state-changing requests:** every REST mutation requires an `Origin` exactly matching configured `WEB_ORIGIN`; missing and other origins are rejected. Browser socket handshakes use the same allowlist. OAuth callback navigation is exempt. `SameSite=Lax` remains defense in depth.
+- **Remote server icons:** HTTPS URLs are accepted, with `no-referrer` on browser image requests. The remote host still receives the viewer's IP and request metadata; this is an accepted product tradeoff.
 - **Implementation note (Phase 3):** this is built as `express-session` + `connect-redis` directly, not behind a hand-rolled `SessionStore` port — a deliberate, confirmed exception to the port/adapter convention (`AGENTS.md` §2), the same status as socket.io ([repo-structure.md §4](./repo-structure.md)). `connect-redis`'s `RedisStore` reuses the app's existing injectable Redis connection rather than opening a second one. `rolling: true` on the cookie session is what gives the sliding 7-day expiry above — every request that touches the session pushes `expiresAt` back out, with no separate "touch" logic needed.
 
 ---
@@ -58,6 +60,7 @@ Out of scope (this doc): the RBAC *data model* (role definitions, channel overri
 ## 5. Logout
 
 - **Scope:** logs out the current device/browser only — clears that session's cookie and deletes its Redis entry. Other devices' sessions are untouched.
+- Sockets authenticated by that session are disconnected immediately; account deletion disconnects every live socket for the user. Connected sockets also re-check the Redis session on each existing heartbeat and close after expiry or revocation.
 - **"Log out everywhere" (kill all sessions for a user):** **deferred to a future enhancement.** Not built now, but the data model supports adding it cheaply later via a secondary Redis index (`userId → {sessionIds}`) alongside the existing per-session store.
 
 ---

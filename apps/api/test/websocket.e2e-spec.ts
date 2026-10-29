@@ -174,7 +174,7 @@ describe('the WebSocket transport (e2e)', () => {
   function connect(cookie: string): Promise<Socket> {
     return new Promise((resolve, reject) => {
       const socket = io(baseUrl, {
-        extraHeaders: { Cookie: cookie },
+        extraHeaders: { Cookie: cookie, Origin: 'http://localhost:5173' },
         reconnection: false,
       });
       socket.once('connect', () => {
@@ -189,10 +189,16 @@ describe('the WebSocket transport (e2e)', () => {
   }
 
   /** A connection that must be refused, resolved with the `connect_error` the client saw. */
-  function expectRefusal(cookie?: string): Promise<ConnectError> {
+  function expectRefusal(
+    cookie?: string,
+    origin = 'http://localhost:5173',
+  ): Promise<ConnectError> {
     return new Promise((resolve, reject) => {
       const socket = io(baseUrl, {
-        ...(cookie === undefined ? {} : { extraHeaders: { Cookie: cookie } }),
+        extraHeaders: {
+          Origin: origin,
+          ...(cookie === undefined ? {} : { Cookie: cookie }),
+        },
         reconnection: false,
       });
       socket.once('connect_error', (error: Error) => {
@@ -373,6 +379,13 @@ describe('the WebSocket transport (e2e)', () => {
       expect(error.message).toBe('Not logged in');
     });
 
+    it('refuses a valid session from an untrusted browser origin', async () => {
+      const { cookie } = await logIn(OWNER);
+      const error = await expectRefusal(cookie, 'https://attacker.example');
+
+      expect(error.message).toBe('Origin not allowed');
+    });
+
     it('refuses a cookie whose session was destroyed, exactly as REST does', async () => {
       const { agent, cookie } = await logIn(OUTSIDER);
       await agent.post('/auth/logout');
@@ -385,6 +398,61 @@ describe('the WebSocket transport (e2e)', () => {
       expect(socketError.message).toBe('Not logged in');
       expect(rest.status).toBe(401);
       expect(errorOf(rest.body).message).toBe('Not logged in');
+    });
+
+    it('disconnects the socket when its session logs out', async () => {
+      const { agent, cookie } = await logIn(OWNER);
+      const socket = await connect(cookie);
+      const disconnected = new Promise<void>((resolve) => {
+        socket.once('disconnect', () => resolve());
+      });
+
+      const logout = await agent.post('/auth/logout');
+      expect(logout.status).toBe(204);
+      await disconnected;
+      expect(gateway.server.sockets.sockets.has(socket.id)).toBe(false);
+    });
+
+    it('disconnects every socket for a user when their account is deleted', async () => {
+      const first = await logIn(OWNER);
+      const second = await logIn(OWNER);
+      const firstSocket = await connect(first.cookie);
+      const secondSocket = await connect(second.cookie);
+      const firstDisconnected = new Promise<void>((resolve) => {
+        firstSocket.once('disconnect', () => resolve());
+      });
+      const secondDisconnected = new Promise<void>((resolve) => {
+        secondSocket.once('disconnect', () => resolve());
+      });
+
+      const deletion = await first.agent.delete('/auth/me');
+      expect(deletion.status).toBe(204);
+      await Promise.all([firstDisconnected, secondDisconnected]);
+      expect(gateway.server.sockets.sockets.has(firstSocket.id)).toBe(false);
+      expect(gateway.server.sockets.sockets.has(secondSocket.id)).toBe(false);
+    });
+
+    it('disconnects when the Redis session expires while the socket is open', async () => {
+      const { cookie } = await logIn(OWNER);
+      const socket = await connect(cookie);
+      const disconnected = new Promise<void>((resolve) => {
+        socket.once('disconnect', () => resolve());
+      });
+      const encoded = cookie.split('=')[1];
+      if (encoded === undefined) throw new Error('Session cookie has no value');
+      const signed = decodeURIComponent(encoded);
+      const sessionId = signed.replace(/^s:/, '').split('.')[0];
+      if (sessionId === undefined || sessionId === '') {
+        throw new Error('Could not read session id from test cookie');
+      }
+      await redis.del(`huddle:sess:${sessionId}`);
+
+      const serverSocket = gateway.server.sockets.sockets.get(socket.id);
+      if (serverSocket === undefined) throw new Error('Server socket not found');
+      serverSocket.conn.emit('heartbeat');
+
+      await disconnected;
+      expect(gateway.server.sockets.sockets.has(socket.id)).toBe(false);
     });
 
     it('refuses a user deleted after login, exactly as REST does', async () => {

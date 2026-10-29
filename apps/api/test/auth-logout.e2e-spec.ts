@@ -107,6 +107,28 @@ describe('POST /auth/logout, DELETE /auth/me (e2e)', () => {
     expect(response.body).toMatchObject({ error: { code: 'UNAUTHORIZED' } });
   });
 
+  it('rejects a state-changing request from an untrusted origin', async () => {
+    const agent = await loggedInAgent(app);
+
+    const response = await agent
+      .post('/auth/logout')
+      .set('Origin', 'https://attacker.example');
+
+    expect(response.status).toBe(403);
+    expect((await agent.get('/auth/me')).status).toBe(200);
+  });
+
+  it('rejects a state-changing request without an Origin header', async () => {
+    const agent = await loggedInAgent(app);
+
+    const response = await agent
+      .post('/auth/logout')
+      .set('X-Huddle-E2E-Omit-Origin', 'true');
+
+    expect(response.status).toBe(403);
+    expect((await agent.get('/auth/me')).status).toBe(200);
+  });
+
   it("deletes the account and invalidates every live session, not just the caller's", async () => {
     const agentA = await loggedInAgent(app);
     const agentB = await loggedInAgent(app);

@@ -32,6 +32,15 @@ import type {
 import { ChatService } from './chat.service';
 import { ChatStateStore, VIOLATION_LIMIT } from './chat-state-store.interface';
 import { PresenceService } from '../presence/presence.service';
+import { SessionMiddleware } from '../auth/session.middleware';
+import {
+  SESSION_REVOKED,
+  USER_SESSIONS_REVOKED,
+} from '../auth/session-events';
+import type {
+  SessionRevoked,
+  UserSessionsRevoked,
+} from '../auth/session-events';
 import { PRESENCE_ONLINE, PRESENCE_OFFLINE } from '../presence/presence-events';
 import {
   CatchUpAck,
@@ -158,6 +167,7 @@ export class ChatGateway implements OnGatewayConnection {
     private readonly rateLimiter: RateLimiterService,
     private readonly snowflakes: SnowflakeService,
     private readonly presence: PresenceService,
+    private readonly sessions: SessionMiddleware,
     logger: LoggerService,
   ) {
     this.logger = logger;
@@ -194,9 +204,25 @@ export class ChatGateway implements OnGatewayConnection {
         this.logger.clearCorrelationId();
       });
 
-      // Heartbeat: socket.io pong received
-      socket.on('pong', async () => {
-        await this.presence.onHeartbeat(socket.data.user.id, socket.id);
+      // Engine.IO emits this for real transport ping/pong traffic. The
+      // namespace Socket does not receive transport control packets.
+      socket.conn.on('heartbeat', async () => {
+        try {
+          const userId = await this.sessions.activeSessionUserId(
+            socket.data.sessionId,
+          );
+          if (userId !== socket.data.user.id.toString()) {
+            socket.disconnect(true);
+            return;
+          }
+          await this.presence.onHeartbeat(socket.data.user.id, socket.id);
+        } catch (error) {
+          this.logger.warn('ChatGateway', 'Session heartbeat check failed', {
+            error: String(error),
+            userId: socket.data.user.id.toString(),
+          });
+          socket.disconnect(true);
+        }
       });
 
       this.logger.debug(
@@ -214,6 +240,20 @@ export class ChatGateway implements OnGatewayConnection {
         { error: String(error), userId: socket.data.user.id.toString() },
       );
       socket.disconnect(true);
+    }
+  }
+
+  @OnEvent(SESSION_REVOKED)
+  onSessionRevoked({ sessionId }: SessionRevoked): void {
+    for (const socket of this.server.sockets.sockets.values()) {
+      if (socket.data.sessionId === sessionId) socket.disconnect(true);
+    }
+  }
+
+  @OnEvent(USER_SESSIONS_REVOKED)
+  onUserSessionsRevoked({ userId }: UserSessionsRevoked): void {
+    for (const socket of this.server.sockets.sockets.values()) {
+      if (socket.data.user.id === userId) socket.disconnect(true);
     }
   }
 
