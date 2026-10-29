@@ -75,7 +75,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** A `connect_error` as socket.io-client delivers it — the server payload rides on `data`. */
-type ConnectError = Error & { data?: { retryAfter?: number } };
+type ConnectError = Error & { data?: { code?: string; retryAfter?: number } };
 
 interface Session {
   agent: ReturnType<typeof request.agent>;
@@ -483,6 +483,7 @@ describe('the WebSocket transport (e2e)', () => {
       const error = await expectRefusal(cookie);
 
       expect(error.message).toBe('Too many connection attempts');
+      expect(error.data?.code).toBe('RATE_LIMITED');
       expect(error.data?.retryAfter).toBeGreaterThan(0);
     });
   });

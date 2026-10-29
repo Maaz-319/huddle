@@ -5,7 +5,6 @@ import { useAuthStore } from '@/stores/authStore';
 import { useServerStore } from '@/stores/serverStore';
 import { useChannelStore } from '@/stores/channelStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useSocket } from '@/hooks/useSocket';
 import { useTyping } from '@/hooks/useMessages';
 import { useChannelTranscript } from '@/transcript/channelTranscript';
 import { useMyRole } from '@/hooks/useMyRole';
@@ -22,7 +21,6 @@ export function MessagePane() {
   const { servers } = useServerStore();
   const { channelsByServer } = useChannelStore();
   const { isChannelListOpen, isMemberSidebarOpen, toggleChannelList, toggleMemberSidebar } = useUIStore();
-  const { status } = useSocket();
 
   const [scrolledToBottom, setScrolledToBottom] = useState(true);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -102,17 +100,6 @@ export function MessagePane() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Connection state banner */}
-      {status !== 'connected' && (
-        <div
-          className="flex items-center justify-center gap-2 px-4 py-1.5 bg-accent-warn/15 border-b border-accent-warn/40 text-xs text-accent-warn"
-          role="status"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-accent-warn animate-pulse" />
-          {status === 'connecting' ? 'Connecting…' : 'Disconnected — reconnecting…'}
-        </div>
-      )}
-
       {/* Channel header */}
       <div className="hidden h-16 items-center justify-between border-b border-border-subtle px-4 lg:flex">
         <div className="flex items-center gap-3 min-w-0">

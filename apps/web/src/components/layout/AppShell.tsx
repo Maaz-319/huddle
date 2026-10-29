@@ -48,6 +48,7 @@ function NoServersWelcome({ onCreateServer }: { onCreateServer: () => void }) {
 
 export function AppShell() {
   const { user, isHydrated, hydrate } = useAuthStore();
+  const userId = user?.id;
   const { socket, status, connect, on } = useSocket();
   useTranscriptRuntime();
   const {
@@ -136,10 +137,10 @@ export function AppShell() {
 
   // Connect socket when authenticated
   useEffect(() => {
-    if (user && status === 'disconnected') {
+    if (userId) {
       connect();
     }
-  }, [user, status, connect]);
+  }, [userId, connect]);
 
   // Set up socket event handlers. Message rows and their catch-up cursor
   // live in the message store's own listeners (useMessages) — advancing
@@ -265,6 +266,24 @@ export function AppShell() {
 
         {/* Message pane / settings — center, flex-1 */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {user && status !== 'connected' && (
+            <div
+              className="flex shrink-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-accent-warn/40 bg-accent-warn/10 px-4 py-1.5 text-xs text-accent-warn"
+              role="status"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-warn animate-pulse" aria-hidden="true" />
+              {status === 'connecting'
+                ? 'Connecting or retrying…'
+                : status === 'error'
+                  ? 'Connection stopped.'
+                  : 'Disconnected — reconnecting…'}
+              {status === 'error' && (
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={connect}>
+                  Retry
+                </Button>
+              )}
+            </div>
+          )}
           {Object.entries(accessProbeStatuses).map(([serverId, status]) => {
             const serverName = servers.find((server) => server.id === serverId)?.name ?? 'server';
             return (

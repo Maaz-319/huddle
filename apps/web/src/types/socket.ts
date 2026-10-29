@@ -163,6 +163,8 @@ export type AckResponseMap = {
 
 export type SocketStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+export type ConnectErrorCode = 'AUTH_REQUIRED' | 'RATE_LIMITED' | 'REFUSED';
+
 export interface SocketState {
   socket: import('socket.io-client').Socket | null;
   status: SocketStatus;

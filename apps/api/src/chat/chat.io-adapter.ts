@@ -4,6 +4,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import type { ServerOptions, Socket } from 'socket.io';
 import type { Server } from 'socket.io';
 import { resolveSessionUser } from '../auth/resolve-session-user';
+import { UnauthorizedError } from '../common/errors';
 import { SessionMiddleware } from '../auth/session.middleware';
 import { UserRepository } from '../auth/user-repository.interface';
 import type { User } from '../auth/user-repository.interface';
@@ -55,7 +56,10 @@ export type AuthenticatedServer = Server<
 class ConnectError extends Error {
   constructor(
     message: string,
-    readonly data: { retryAfter: number },
+    readonly data: {
+      code: 'AUTH_REQUIRED' | 'RATE_LIMITED' | 'REFUSED';
+      retryAfter?: number;
+    },
   ) {
     super(message);
     this.name = 'ConnectError';
@@ -165,6 +169,7 @@ export class ChatIoAdapter extends IoAdapter {
 
       next(
         new ConnectError('Too many connection attempts', {
+          code: 'RATE_LIMITED',
           retryAfter: decision.retryAfterMs,
         }),
       );
@@ -175,7 +180,12 @@ export class ChatIoAdapter extends IoAdapter {
       logger.error('ChatIoAdapter', 'ws-connect limiter failed', {
         error: String(error),
       });
-      next(new ConnectError('Connection refused', { retryAfter: 1000 }));
+      next(
+        new ConnectError('Connection refused', {
+          code: 'REFUSED',
+          retryAfter: 1000,
+        }),
+      );
     }
   }
 
@@ -193,9 +203,11 @@ export class ChatIoAdapter extends IoAdapter {
       socket.data.user = user;
       next();
     } catch (error) {
-      // `resolveSessionUser`'s UnauthorizedError message says which of the
-      // three checks rejected; socket.io delivers it as `connect_error`.
-      next(error instanceof Error ? error : new Error('Handshake failed'));
+      if (error instanceof UnauthorizedError) {
+        next(new ConnectError(error.message, { code: 'AUTH_REQUIRED' }));
+        return;
+      }
+      next(new ConnectError('Connection refused', { code: 'REFUSED' }));
     }
   }
 }
