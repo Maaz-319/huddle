@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useSocketStore } from '@/stores/socketStore';
 import { connectSocket, disconnectSocket, emitWithAck, onServerEvent } from '@/api/socket';
 import type { SocketStatus, ClientEventMap, ClientEventType, ServerEventMap, ServerEventType, AckResponseMap } from '@/types/socket';
@@ -21,14 +21,6 @@ function toWirePayload<K extends ClientEventType>(
 
 export function useSocket() {
   const { socket, status } = useSocketStore();
-  const initializedRef = useRef(false);
-
-  useEffect(() => {
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      connectSocket();
-    }
-  }, []);
 
   const connect = useCallback(() => {
     connectSocket();

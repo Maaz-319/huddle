@@ -1,12 +1,27 @@
 import { io, Socket } from 'socket.io-client';
 import { useSocketStore } from '@/stores/socketStore';
 import { usePresenceStore } from '@/stores/presenceStore';
+import { useAuthStore } from '@/stores/authStore';
+import { authApi } from '@/api/auth';
 import { crypto } from '@/utils/crypto';
-import type { SocketStatus, ServerEventMap, ServerEventType, ClientEventType, ClientEventMap, AckResponseMap } from '@/types/socket';
+import type { SocketStatus, ServerEventMap, ServerEventType, ClientEventType, ClientEventMap, AckResponseMap, ConnectErrorCode } from '@/types/socket';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+const BASE_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+
+type TimeoutHandle = ReturnType<typeof setTimeout>;
+type EventHandler = (payload: unknown) => void;
+type PendingAck = { resolve: (value: unknown) => void; reject: (reason: unknown) => void; timeout: TimeoutHandle };
+type ConnectError = Error & { data?: { code?: ConnectErrorCode; retryAfter?: number } };
 
 let socketInstance: Socket | null = null;
+let reconnectTimer: TimeoutHandle | null = null;
+let reconnectAttempt = 0;
+let intentionalDisconnect = false;
+let authRefreshAttempted = false;
+let eventHandlers = new Map<ServerEventType, Set<EventHandler>>();
+const pendingAcks = new Map<string, PendingAck>();
 
 export class SocketAckError extends Error {
   readonly retryable: boolean;
@@ -15,6 +30,25 @@ export class SocketAckError extends Error {
     super(code);
     this.name = 'SocketAckError';
     this.retryable = retryable;
+  }
+}
+
+function setStatus(status: SocketStatus): void {
+  useSocketStore.getState().setStatus(status);
+}
+
+function clearReconnectTimer(): void {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function settlePendingAcks(error: Error): void {
+  for (const [key, pending] of pendingAcks) {
+    clearTimeout(pending.timeout);
+    pending.reject(error);
+    pendingAcks.delete(key);
   }
 }
 
@@ -28,195 +62,194 @@ function createSocket(): Socket {
   });
 
   socketInstance = socket;
+  useSocketStore.getState().setSocket(socket);
+  setupSocketListeners(socket);
   return socket;
 }
 
-function destroySocket(): void {
-  if (socketInstance) {
-    socketInstance.disconnect();
-    socketInstance = null;
+function calculateReconnectDelay(attempt: number): number {
+  const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
+  return Math.floor(delay + delay * 0.1 * Math.random());
+}
+
+function scheduleReconnect(delay: number): void {
+  clearReconnectTimer();
+  if (intentionalDisconnect) return;
+  setStatus('connecting');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!intentionalDisconnect && socketInstance && !socketInstance.connected) {
+      socketInstance.connect();
+    }
+  }, delay);
+}
+
+function stopForRefusal(): void {
+  clearReconnectTimer();
+  setStatus('error');
+}
+
+function handleConnectError(rawError: Error): void {
+  const error = rawError as ConnectError;
+  const code = error.data?.code;
+  if (import.meta.env.DEV) console.error('[Socket] Connection error:', error.message, code);
+
+  if (code === 'RATE_LIMITED') {
+    reconnectAttempt = 0;
+    scheduleReconnect(Math.max(0, error.data?.retryAfter ?? 1000));
+    return;
+  }
+
+  if (code === 'AUTH_REQUIRED') {
+    stopForRefusal();
+    if (authRefreshAttempted) return;
+    authRefreshAttempted = true;
+    void authApi.getMe().then((user) => {
+      useAuthStore.getState().setUser(user);
+      intentionalDisconnect = false;
+      setStatus('connecting');
+      socketInstance?.connect();
+    }).catch((authError: unknown) => {
+      if (authError instanceof Error && authError.message === 'UNAUTHORIZED') {
+        useAuthStore.getState().setUser(null);
+      }
+    });
+    return;
+  }
+
+  if (code === 'REFUSED') {
+    stopForRefusal();
+    return;
+  }
+
+  // Socket.IO emits a data-less connect_error for transport failures. These
+  // remain transient; the backend uses the stable codes above for refusals.
+  const delay = calculateReconnectDelay(reconnectAttempt);
+  reconnectAttempt += 1;
+  scheduleReconnect(delay);
+}
+
+function dispatchServerEvent<K extends ServerEventType>(event: K, payload: ServerEventMap[K]): void {
+  const handlers = eventHandlers.get(event);
+  if (!handlers) return;
+  for (const handler of handlers) {
+    try {
+      handler(payload);
+    } catch (error) {
+      console.error(`[Socket] Handler error for ${event}:`, error);
+    }
   }
 }
 
-function calculateReconnectDelay(attempt: number, baseDelay: number, maxDelay: number): number {
-  const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
-  const jitter = delay * 0.1 * Math.random();
-  return Math.floor(delay + jitter);
-}
-
 function setupSocketListeners(socket: Socket): void {
-  const { setStatus, incrementReconnectAttempt, resetReconnectAttempt, getEventHandlers, clearPendingAcks } = useSocketStore.getState();
-
   socket.on('connect', () => {
-    if (import.meta.env.DEV) {
-      console.log('[Socket] Connected:', socket.id);
-    }
+    if (import.meta.env.DEV) console.log('[Socket] Connected:', socket.id);
+    intentionalDisconnect = false;
+    authRefreshAttempted = false;
+    reconnectAttempt = 0;
+    clearReconnectTimer();
     setStatus('connected');
-    resetReconnectAttempt();
   });
 
   socket.on('disconnect', (reason) => {
-    if (import.meta.env.DEV) {
-      console.log('[Socket] Disconnected:', reason);
+    if (import.meta.env.DEV) console.log('[Socket] Disconnected:', reason);
+    settlePendingAcks(new Error('Socket disconnected'));
+    if (intentionalDisconnect) {
+      setStatus('disconnected');
+      return;
     }
-    setStatus('disconnected');
-    clearPendingAcks();
+    if (reason === 'io server disconnect') {
+      stopForRefusal();
+      return;
+    }
+    const delay = calculateReconnectDelay(reconnectAttempt);
+    reconnectAttempt += 1;
+    scheduleReconnect(delay);
   });
 
-  socket.on('connect_error', (error) => {
-    if (import.meta.env.DEV) {
-      console.error('[Socket] Connection error:', error.message);
-    }
-    setStatus('error');
-  });
+  socket.on('connect_error', handleConnectError);
 
-  socket.on('reconnect_attempt', (attemptNumber) => {
-    if (import.meta.env.DEV) {
-      console.log('[Socket] Reconnection attempt:', attemptNumber);
-    }
-    setStatus('connecting');
-    incrementReconnectAttempt();
-  });
-
-  socket.on('reconnect', (attemptNumber) => {
-    if (import.meta.env.DEV) {
-      console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
-    }
-    setStatus('connected');
-    resetReconnectAttempt();
-  });
-
-  socket.on('reconnect_failed', () => {
-    if (import.meta.env.DEV) {
-      console.error('[Socket] Reconnection failed');
-    }
-    setStatus('error');
-  });
-
-  // Handle server events
   const serverEvents: ServerEventType[] = [
     'message_create', 'message_update', 'message_delete',
     'typing', 'presence_online', 'presence_offline',
-    'channel_added', 'channel_removed', 'membership_changed', 'policy_violation'
+    'channel_added', 'channel_removed', 'membership_changed', 'policy_violation',
   ];
 
   for (const event of serverEvents) {
     socket.on(event, (payload: unknown) => {
-      if (import.meta.env.DEV) {
-        console.log('[Socket] Event received:', event, payload);
-      }
-      const handlers = getEventHandlers(event);
-      for (const handler of handlers) {
-        try {
-          handler(payload);
-        } catch (error) {
-          console.error(`[Socket] Handler error for ${event}:`, error);
-        }
-      }
+      if (import.meta.env.DEV) console.log('[Socket] Event received:', event, payload);
+      // The event name selects its payload type; the registered listener is
+      // the typed dispatch seam for Socket.IO's untyped event overload.
+      dispatchServerEvent(event, payload as ServerEventMap[typeof event]);
     });
   }
 
-  // Register presence handlers to update presence store
   socket.on('presence_online', (payload: { userId: string }) => {
     usePresenceStore.getState().setOnline(payload.userId);
   });
-
   socket.on('presence_offline', (payload: { userId: string }) => {
     usePresenceStore.getState().setOffline(payload.userId);
   });
 }
 
+/** Connect once; all transport, retry, event, and acknowledgement lifecycle stays here. */
 export function connectSocket(): Socket {
-  const { socket, status, setSocket, setStatus, baseReconnectDelay, maxReconnectDelay } = useSocketStore.getState();
-  
-  if (socket && (status === 'connected' || status === 'connecting')) {
-    return socket;
-  }
-
-  let socketToUse = socket;
-  if (!socketToUse) {
-    socketToUse = createSocket();
-    setupSocketListeners(socketToUse);
-    setSocket(socketToUse);
-  }
-
+  intentionalDisconnect = false;
+  clearReconnectTimer();
+  const socket = socketInstance ?? createSocket();
+  if (socket.connected || useSocketStore.getState().status === 'connecting') return socket;
+  authRefreshAttempted = false;
   setStatus('connecting');
-  
-  // Implement custom reconnection with exponential backoff
-  socketToUse.io.reconnection(false);
-  socketToUse.connect();
-
-  // Set up reconnection logic
-  const attemptReconnect = () => {
-    const { status: currentStatus, reconnectAttempt: currentAttempt } = useSocketStore.getState();
-    if (currentStatus === 'connected') return;
-    
-    const delay = calculateReconnectDelay(currentAttempt, baseReconnectDelay, maxReconnectDelay);
-    if (import.meta.env.DEV) {
-      console.log(`[Socket] Reconnecting in ${delay}ms (attempt ${currentAttempt + 1})`);
-    }
-    
-    setTimeout(() => {
-      const { status: latestStatus } = useSocketStore.getState();
-      if (latestStatus !== 'connected') {
-        socketToUse?.connect();
-      }
-    }, delay);
-  };
-
-  socketToUse.on('disconnect', (reason) => {
-    if (reason === 'io server disconnect') {
-      // Server initiated disconnect, don't reconnect
-      return;
-    }
-    // Client-side disconnect, attempt reconnect
-    attemptReconnect();
-  });
-
-  return socketToUse;
+  socket.connect();
+  return socket;
 }
 
 export function disconnectSocket(): void {
-  const { socket, clearPendingAcks, setSocket, setStatus } = useSocketStore.getState();
-  
-  if (socket) {
-    socket.disconnect();
-    clearPendingAcks();
-    setSocket(null);
-    setStatus('disconnected');
+  intentionalDisconnect = true;
+  clearReconnectTimer();
+  settlePendingAcks(new Error('Socket disconnected'));
+  if (socketInstance) {
+    socketInstance.disconnect();
+    socketInstance = null;
   }
-  destroySocket();
+  eventHandlers = new Map();
+  useSocketStore.getState().setSocket(null);
+  setStatus('disconnected');
+  reconnectAttempt = 0;
+  authRefreshAttempted = false;
 }
 
 export function emitWithAck<K extends ClientEventType>(
   event: K,
   payload: ClientEventMap[K],
-  timeoutMs = 10000
+  timeoutMs = 10000,
 ): Promise<AckResponseMap[K]> {
-  const { socket } = useSocketStore.getState();
-  
-  if (!socket || !socket.connected) {
-    return Promise.reject(new Error('Socket not connected'));
-  }
+  const socket = socketInstance;
+  if (!socket?.connected) return Promise.reject(new Error('Socket not connected'));
 
   return new Promise<AckResponseMap[K]>((resolve, reject) => {
     const ackKey = crypto.randomUUID();
-    const { addPendingAck, resolvePendingAck, rejectPendingAck } = useSocketStore.getState();
     const timeout = setTimeout(() => {
-      rejectPendingAck(ackKey, new Error(`Ack timeout for ${event}`));
+      const pending = pendingAcks.get(ackKey);
+      if (!pending) return;
+      pendingAcks.delete(ackKey);
+      pending.reject(new Error(`Ack timeout for ${event}`));
     }, timeoutMs);
-    addPendingAck(ackKey, { 
-      resolve: resolve as (value: unknown) => void, 
-      reject, 
-      timeout 
+    pendingAcks.set(ackKey, {
+      resolve: resolve as (value: unknown) => void,
+      reject,
+      timeout,
     });
 
-    // Emit with ack callback
     socket.emit(event, payload, (response: AckResponseMap[K]) => {
+      const pending = pendingAcks.get(ackKey);
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      pendingAcks.delete(ackKey);
       if ('error' in response && response.error) {
-        rejectPendingAck(ackKey, new SocketAckError(response.error.code, response.error.retryable));
+        pending.reject(new SocketAckError(response.error.code, response.error.retryable));
       } else {
-        resolvePendingAck(ackKey, response);
+        pending.resolve(response);
       }
     });
   });
@@ -224,11 +257,15 @@ export function emitWithAck<K extends ClientEventType>(
 
 export function onServerEvent<K extends ServerEventType>(
   event: K,
-  handler: (payload: ServerEventMap[K]) => void
+  handler: (payload: ServerEventMap[K]) => void,
 ): () => void {
-  const { addEventHandler, removeEventHandler } = useSocketStore.getState();
-  addEventHandler(event, handler);
-  return () => removeEventHandler(event, handler);
+  const handlers = eventHandlers.get(event) ?? new Set<EventHandler>();
+  handlers.add(handler as EventHandler);
+  eventHandlers.set(event, handlers);
+  return () => {
+    handlers.delete(handler as EventHandler);
+    if (handlers.size === 0) eventHandlers.delete(event);
+  };
 }
 
 export function getSocketStatus(): SocketStatus {
@@ -236,5 +273,5 @@ export function getSocketStatus(): SocketStatus {
 }
 
 export function getSocketInstance(): Socket | null {
-  return useSocketStore.getState().socket;
+  return socketInstance;
 }

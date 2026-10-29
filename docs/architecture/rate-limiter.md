@@ -90,7 +90,7 @@ These numbers are starting points and are meant to be retuned. `apps/api/src/rat
 - **REST, rejection:** `429` + a `Retry-After` header, in the standard error body shape (`{ "error": { "code": "RATE_LIMITED", ... } }`). `Retry-After` is whole seconds **rounded up** — a `Retry-After: 0` tells a client to retry immediately, which is the opposite of the intent.
 - **REST, every rate-limited response:** `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`, on the allowed responses too. This is the half of Discord's pattern that lets clients back off *proactively*; `Retry-After` alone only tells a client what to do once it has already been rejected.
 - **WS event/frame violation:** an error frame scoped to the offending event only — the message/event is dropped, the connection stays up *for that refusal*. Each refusal is also **counted per user**; what the count does is §7.
-- **WS connection-attempt violation:** rejected in the `io.use()` middleware — `next(new Error(...))` carrying a `retryAfter` value in the error's `data` payload, delivered to the client as a `connect_error` (no HTTP `429`/`Retry-After` header, since this isn't a raw HTTP response) — before any WS connection is established.
+- **WS connection-attempt violation:** rejected in the `io.use()` middleware with `data.code = RATE_LIMITED` and a `retryAfter` value in milliseconds, delivered to the client as a `connect_error` (no HTTP `429`/`Retry-After` header, since this isn't a raw HTTP response) — before any WS connection is established. The client waits that duration before retrying.
 
 ---
 
