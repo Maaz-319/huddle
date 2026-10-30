@@ -9,12 +9,14 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import type { MessageResponse } from '@/types/socket';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 
 interface MessageProps {
   message: MessageResponse;
+  /** Whether this row begins an author group and should show author identity. */
+  showAuthor?: boolean;
   isOwn: boolean;
   canPost?: boolean;
   canDeleteOthers?: boolean;
@@ -25,7 +27,7 @@ interface MessageProps {
   onDiscard?: (messageId: string) => void;
 }
 
-export function Message({ message, isOwn, canPost = true, canDeleteOthers = false, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
+export function Message({ message, showAuthor = true, isOwn, canPost = true, canDeleteOthers = false, onEdit, onDelete, onCopy, onRetry, onDiscard }: MessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content ?? '');
   const [editFailed, setEditFailed] = useState(false);
@@ -75,16 +77,7 @@ export function Message({ message, isOwn, canPost = true, canDeleteOthers = fals
 
   const formatTimestamp = (timestamp: string) => {
     try {
-      const date = new Date(timestamp);
-      return formatDistanceToNow(date, { addSuffix: true });
-    } catch {
-      return '';
-    }
-  };
-
-  const absoluteTime = (timestamp: string) => {
-    try {
-      return new Date(timestamp).toLocaleString();
+      return format(new Date(timestamp), 'h:mm a');
     } catch {
       return '';
     }
@@ -102,48 +95,68 @@ export function Message({ message, isOwn, canPost = true, canDeleteOthers = fals
       style={{ paddingBlock: 'var(--msg-gap, 8px)', paddingLeft: '1rem' }}
       data-message-id={message.id}
     >
-      <div className="relative flex-shrink-0 w-8 h-8">
-        {message.author.avatarUrl ? (
-          <img
-            src={message.author.avatarUrl}
-            alt=""
-            className="w-8 h-8 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
-            style={{ backgroundColor: getColorFromString(message.author.username) }}
-          >
-            {getInitials(message.author.username)}
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <span className="font-medium text-sm text-text-primary truncate max-w-[60%]">{message.author.username}</span>
-          {isOwn && (
-            <span className="text-xs text-text-muted px-1.5 py-0.5 bg-bg-raised rounded">You</span>
-          )}
-          <time
-            className="text-xs text-text-muted whitespace-nowrap"
-            dateTime={message.createdAt}
-            title={absoluteTime(message.createdAt)}
-          >
-            {formatTimestamp(message.createdAt)}
-          </time>
-          {message.editedAt && !isPending && (
-            <span
-              className="text-xs text-text-muted"
-              title={absoluteTime(message.editedAt)}
+      {showAuthor && (
+        <div className="relative flex-shrink-0 w-8 h-8">
+          {message.author.avatarUrl ? (
+            <img
+              src={message.author.avatarUrl}
+              alt=""
+              className="w-8 h-8 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center font-medium text-white text-sm"
+              style={{ backgroundColor: getColorFromString(message.author.username) }}
             >
-              (edited)
-            </span>
+              {getInitials(message.author.username)}
+            </div>
           )}
         </div>
+      )}
+
+      <div className="flex-1 min-w-0" style={{ marginLeft: showAuthor ? undefined : '2.75rem' }}>
+        {showAuthor && (
+          <div className="flex items-baseline justify-between gap-3 min-w-0">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="font-medium text-sm text-text-primary truncate">{message.author.username}</span>
+              {isOwn && (
+                <span className="text-xs text-text-muted px-1.5 py-0.5 bg-bg-raised rounded">You</span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2 flex-shrink-0">
+              <time
+                className="text-xs text-text-muted whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity"
+                dateTime={message.createdAt}
+              >
+                {formatTimestamp(message.createdAt)}
+              </time>
+              {message.editedAt && !isPending && (
+                <span
+                  className="text-xs text-text-muted"
+                >
+                  (edited)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!showAuthor && (
+          <span className="float-right ml-2 text-xs text-text-muted whitespace-nowrap">
+            <time
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
+              dateTime={message.createdAt}
+            >
+              {formatTimestamp(message.createdAt)}
+            </time>
+            {message.editedAt && !isPending && (
+              <span className="ml-1">(edited)</span>
+            )}
+          </span>
+        )}
 
         {isEditing ? (
-          <div className="mt-1 space-y-1.5">
+          <div className={cn(showAuthor && 'mt-1', 'space-y-1.5')}>
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
@@ -174,12 +187,7 @@ export function Message({ message, isOwn, canPost = true, canDeleteOthers = fals
             </div>
           </div>
         ) : (
-          <div
-            className={cn(
-              'text-text-primary whitespace-pre-wrap break-words',
-              isDeleted && 'text-text-muted italic'
-            )}
-          >
+          <div className={cn('text-text-primary whitespace-pre-wrap break-words', isDeleted && 'text-text-muted italic')}>
             {isDeleted ? 'message deleted' : message.content}
           </div>
         )}
