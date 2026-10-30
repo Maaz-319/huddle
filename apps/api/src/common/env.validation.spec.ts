@@ -7,10 +7,11 @@ const valid = {
   REDIS_URL: 'redis://localhost:6379',
   WEB_ORIGIN: 'http://localhost:5173',
   TRUSTED_PROXY_HOPS: '0',
+  LOG_LEVEL: 'info',
   GITHUB_CLIENT_ID: 'test-client-id',
   GITHUB_CLIENT_SECRET: 'test-client-secret',
   GITHUB_CALLBACK_URL: 'http://localhost:3000/auth/github/callback',
-  SESSION_SECRET: 'test-session-secret',
+  SESSION_SECRET: 'test-session-secret-which-is-at-least-32-characters',
 };
 
 describe('validate', () => {
@@ -83,16 +84,24 @@ describe('validate', () => {
     expect(message).toMatch(/NODE_ENV/);
   });
 
-  it('falls back to defaults for the optional variables', () => {
-    const config = validate(
-      omit('PORT', 'WEB_ORIGIN', 'NODE_ENV', 'TRUSTED_PROXY_HOPS'),
+  it('rejects missing runtime configuration instead of using implicit defaults', () => {
+    const message = expectThrownMessage(() =>
+      validate(
+        omit(
+          'PORT',
+          'WEB_ORIGIN',
+          'NODE_ENV',
+          'TRUSTED_PROXY_HOPS',
+          'LOG_LEVEL',
+        ),
+      ),
     );
 
-    expect(config.PORT).toBe(3000);
-    expect(config.WEB_ORIGIN).toBe('http://localhost:5173');
-    expect(config.NODE_ENV).toBe(NodeEnv.Development);
-    // Nothing sits in front of the app locally, so no hop may be trusted.
-    expect(config.TRUSTED_PROXY_HOPS).toBe(0);
+    expect(message).toMatch(/PORT/);
+    expect(message).toMatch(/WEB_ORIGIN/);
+    expect(message).toMatch(/NODE_ENV/);
+    expect(message).toMatch(/TRUSTED_PROXY_HOPS/);
+    expect(message).toMatch(/LOG_LEVEL/);
   });
 
   it('coerces TRUSTED_PROXY_HOPS to a number', () => {

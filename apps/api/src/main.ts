@@ -17,7 +17,7 @@ async function bootstrap() {
     app.get<ConfigService<EnvironmentVariables, true>>(ConfigService);
 
   // CORS — allow the frontend origin with credentials for session cookies.
-  // WEB_ORIGIN defaults to http://localhost:5173 in development.
+  // WEB_ORIGIN is required and validated during application startup.
   app.enableCors({
     origin: config.get('WEB_ORIGIN', { infer: true }),
     credentials: true,

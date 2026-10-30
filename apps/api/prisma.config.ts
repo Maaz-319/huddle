@@ -1,8 +1,11 @@
-// Prisma CLI configuration. This is the one file that reads process.env
-// directly: it configures the CLI, which runs outside the Nest application and
-// so has no ConfigService to read from.
+// Prisma CLI runs outside the Nest application and has no ConfigService.
 import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
+
+const databaseUrl = process.env['DATABASE_URL'];
+if (!databaseUrl) {
+  throw new Error('Missing required environment variable: DATABASE_URL');
+}
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
@@ -10,6 +13,6 @@ export default defineConfig({
     path: 'prisma/migrations',
   },
   datasource: {
-    url: process.env['DATABASE_URL'],
+    url: databaseUrl,
   },
 });

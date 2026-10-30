@@ -37,9 +37,13 @@ cd huddle
 npm install
 npm run db:up
 cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
 npm run db:migrate
 npm run dev
 ```
+
+Before `npm run dev`, fill the empty GitHub OAuth values and `SESSION_SECRET`
+in `apps/api/.env`. OAuth credentials are required for the API to start.
 
 Run every command from the repo root — the workspaces resolve from there, and there is
 a single `package-lock.json` at the root. Never run `npm install` inside `apps/*`.
@@ -94,18 +98,30 @@ look like omissions and are not:
 
 ## Configuration
 
-Configuration lives in `apps/api/.env`, copied from
-[`apps/api/.env.example`](apps/api/.env.example). `.env` is git-ignored and never
-committed; `.env.example` is committed with defaults matching the Docker Compose
-services below.
+API configuration lives in `apps/api/.env`, copied from
+[`apps/api/.env.example`](apps/api/.env.example). Web configuration lives in
+`apps/web/.env`, copied from [`apps/web/.env.example`](apps/web/.env.example).
+Both `.env` files are git-ignored and never committed; the examples contain the
+local development values for Docker Compose and the Vite proxy.
 
 | Variable | Required | Default | What it is |
 |---|---|---|---|
-| `NODE_ENV` | no | `development` | One of `development`, `test`, `production` |
-| `PORT` | no | `3000` | Port the API listens on |
+| `NODE_ENV` | **yes** | — | One of `development`, `test`, `production` |
+| `PORT` | **yes** | — | Port the API listens on |
 | `DATABASE_URL` | **yes** | — | Postgres connection string |
 | `REDIS_URL` | **yes** | — | Redis connection string |
-| `WEB_ORIGIN` | no | `http://localhost:5173` | Origin the browser client is served from |
+| `WEB_ORIGIN` | **yes** | — | Exact origin the browser client is served from |
+| `TRUSTED_PROXY_HOPS` | **yes** | — | Number of trusted reverse proxy hops |
+| `LOG_LEVEL` | **yes** | — | One of `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent` |
+| `GITHUB_CLIENT_ID` | **yes** | — | GitHub OAuth application ID |
+| `GITHUB_CLIENT_SECRET` | **yes** | — | GitHub OAuth application secret |
+| `GITHUB_CALLBACK_URL` | **yes** | — | Exact registered OAuth callback URL |
+| `SESSION_SECRET` | **yes** | — | Random secret used to sign session cookies |
+
+The web environment requires `VITE_API_URL` to be present. Set it to an API
+origin for a separate API host, or leave it explicitly empty to use same-origin
+routing. `API_PROXY_TARGET` and `WEB_PORT` are required when running Vite's dev
+server and configure its API proxy and listening port.
 
 Every variable is validated at startup against
 [`apps/api/src/common/env.validation.ts`](apps/api/src/common/env.validation.ts).
@@ -135,11 +151,11 @@ data volume is empty — so editing it later requires a `db:reset` to take effec
 
 ## Trying it on another device
 
-Two origins have to be reachable from the other device: the API (default
-`:3000`) and the Vite dev server (`:5173`). The browser learns the API's address
-from `VITE_API_URL` in `apps/web/.env` when the dev server starts, and the API
-decides who may call it and where to send the browser after GitHub login from
-`WEB_ORIGIN` and `GITHUB_CALLBACK_URL` in `apps/api/.env`.
+For a separate API host, set `VITE_API_URL` in `apps/web/.env` to that API's
+origin. To route API requests through the Vite dev server, leave it explicitly
+empty; Vite proxies `/auth`, `/api`, and `/socket.io` to `API_PROXY_TARGET`.
+The API decides who may call it and where to send the browser after GitHub login
+from `WEB_ORIGIN` and `GITHUB_CALLBACK_URL` in `apps/api/.env`.
 
 **Cloudflare quick tunnels do not work for this app.** Two random
 `*.trycloudflare.com` hostnames are two different sites — `trycloudflare.com`
@@ -201,9 +217,6 @@ Both servers read their environment at boot — restart them after editing.
 ```
 VITE_API_URL=https://api.huddle.example.com
 ```
-
-`VITE_WS_URL` is vestigial; the socket.io client connects through
-`VITE_API_URL`.
 
 `apps/api/.env`:
 

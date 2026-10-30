@@ -1,6 +1,8 @@
+import { API_BASE } from '@/api/apiBase'
+
 export function SignInButton() {
   const handleClick = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/auth/github`
+    window.location.href = `${API_BASE}/auth/github`
   }
 
   return (
