@@ -1,6 +1,8 @@
 import { Injectable, Scope } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import pino, { Logger as PinoLogger, LoggerOptions } from 'pino';
+import { EnvironmentVariables, NodeEnv } from './env.validation';
 
 /**
  * Correlation ID keys for different transport layers.
@@ -21,27 +23,27 @@ export const CORRELATION_ID_KEY = 'requestId';
  */
 @Injectable({ scope: Scope.TRANSIENT })
 export class LoggerService {
-  private readonly logger: PinoLogger;
+  private logger: PinoLogger;
   private correlationId: string | undefined;
   private correlationType: 'requestId' | 'socketId' | undefined;
 
-  constructor() {
-    const isTest = process.env.NODE_ENV === 'test';
+  constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {
+    const environment = config.get('NODE_ENV', { infer: true });
+    const isTest = environment === NodeEnv.Test;
 
     const options: LoggerOptions = {
-      level: process.env.LOG_LEVEL ?? (isTest ? 'silent' : 'info'),
+      level: isTest ? 'silent' : config.get('LOG_LEVEL', { infer: true }),
       formatters: {
         level: (label) => ({ level: label }),
       },
       timestamp: pino.stdTimeFunctions.isoTime,
       base: {
         pid: process.pid,
-        hostname: process.env.HOSTNAME ?? 'localhost',
       },
     };
 
     // Pretty print in development for readability
-    if (!isTest && process.env.NODE_ENV !== 'production') {
+    if (!isTest && environment !== NodeEnv.Production) {
       this.logger = pino({
         ...options,
         transport: {
@@ -147,8 +149,8 @@ export class LoggerService {
    * every log line within a specific operation.
    */
   child(bindings: Record<string, unknown>): LoggerService {
-    const child = new LoggerService();
-    child.logger.child(bindings);
+    const child = new LoggerService(this.config);
+    child.logger = this.logger.child(bindings);
     child.correlationId = this.correlationId;
     child.correlationType = this.correlationType;
     return child;

@@ -2,8 +2,10 @@ import { plainToInstance, Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
+  IsIn,
   IsNotEmpty,
   IsString,
+  IsUrl,
   Max,
   Min,
   validateSync,
@@ -19,18 +21,17 @@ export enum NodeEnv {
  * The environment contract. Every variable the API reads is declared here and
  * in .env.example; the two are kept in step in the same commit.
  *
- * Properties with an initializer are optional in the environment and fall back
- * to that value. Properties without one are required.
+ * Every declared property is required and validated at startup.
  */
 export class EnvironmentVariables {
   @IsEnum(NodeEnv)
-  NODE_ENV: NodeEnv = NodeEnv.Development;
+  NODE_ENV!: NodeEnv;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(65535)
-  PORT: number = 3000;
+  PORT!: number;
 
   @IsString()
   @IsNotEmpty()
@@ -42,7 +43,8 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  WEB_ORIGIN: string = 'http://localhost:5173';
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  WEB_ORIGIN!: string;
 
   /**
    * How many reverse-proxy hops sit in front of the app, for Express's
@@ -58,7 +60,10 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(0)
   @Max(10)
-  TRUSTED_PROXY_HOPS: number = 0;
+  TRUSTED_PROXY_HOPS!: number;
+
+  @IsIn(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+  LOG_LEVEL!: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
 
   /** GitHub OAuth App client id (docs/architecture/auth-service.md section 2). */
   @IsString()
@@ -76,6 +81,7 @@ export class EnvironmentVariables {
    */
   @IsString()
   @IsNotEmpty()
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
   GITHUB_CALLBACK_URL!: string;
 
   /**

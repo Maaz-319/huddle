@@ -117,7 +117,8 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
-    // Skip sweep timer in test environments to avoid interfering with tests
+    // Jest owns this test-process flag; it is not application configuration.
+    // Skip the timer in test environments to avoid interfering with tests.
     if (process.env.JEST_WORKER_ID !== undefined) {
       return;
     }

@@ -5,8 +5,6 @@ import { cn } from '@/components/ui/cn';
 import { toast } from '@/stores/toastStore';
 import { useServerStore } from '@/stores/serverStore';
 
-const WEB_ORIGIN = import.meta.env.VITE_WEB_ORIGIN ?? 'http://localhost:5173';
-
 interface InvitePanelProps {
   serverId: string;
   /** Hide regenerate/revoke for members without invite management rights. */
@@ -43,7 +41,7 @@ export function InvitePanel({ serverId, canManage = true, onChanged }: InvitePan
     loadInvite();
   }, [loadInvite]);
 
-  const inviteUrl = `${WEB_ORIGIN}/invite/${inviteCode}`;
+  const inviteUrl = `${window.location.origin}/invite/${inviteCode}`;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(inviteUrl);

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { User } from '@/types/user'
 import { authApi } from '@/api/auth'
+import { API_BASE } from '@/api/apiBase'
 
 export interface AuthState {
   user: User | null
@@ -35,7 +36,7 @@ hydrate: async () => {
       },
 
       login: () => {
-        window.location.href = `${import.meta.env.VITE_API_URL ?? 'http://localhost:3000'}/auth/github`
+        window.location.href = `${API_BASE}/auth/github`
       },
 
       logout: async () => {
