@@ -20,6 +20,7 @@ import { toast } from '@/stores/toastStore';
 import { InviteDialog } from '@/components/servers/InviteDialog';
 import { useContextMenu } from '@/hooks/useContextMenu';
 import { useMyPermissions } from '@/hooks/useMyPermissions';
+import { useBreakpoints } from '@/hooks/useBreakpoints';
 import { getInitials, getColorFromString } from '@/utils/avatar';
 import { safeServerIconUrl } from '@/utils/serverIcon';
 import type { ServerResponse } from '@/types/server';
@@ -34,6 +35,7 @@ export function ServerList() {
     setCreateServerDialogOpen,
   } = useUIStore();
   const navigate = useNavigate();
+  const { isMobile } = useBreakpoints();
   const [createName, setCreateName] = useState('');
   const [createIconUrl, setCreateIconUrl] = useState('');
   const [creating, setCreating] = useState(false);
@@ -186,7 +188,9 @@ export function ServerList() {
                         ? 'bg-accent-primary/20 text-accent-primary'
                         : 'text-text-secondary hover:text-text-primary'
                     )}
-                    onClick={() => closeAllDrawers()}
+                    onClick={() => {
+                      if (isMobile) closeAllDrawers();
+                    }}
                     {...serverMenu.triggerProps(server)}
                   >
                     {iconUrl ? (
