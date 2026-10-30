@@ -43,7 +43,11 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  @IsUrl({
+    protocols: ['http', 'https'],
+    require_protocol: true,
+    require_tld: false,
+  })
   WEB_ORIGIN!: string;
 
   /**
@@ -63,7 +67,8 @@ export class EnvironmentVariables {
   TRUSTED_PROXY_HOPS!: number;
 
   @IsIn(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
-  LOG_LEVEL!: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
+  LOG_LEVEL!:
+    'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
 
   /** GitHub OAuth App client id (docs/architecture/auth-service.md section 2). */
   @IsString()
@@ -81,7 +86,11 @@ export class EnvironmentVariables {
    */
   @IsString()
   @IsNotEmpty()
-  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  @IsUrl({
+    protocols: ['http', 'https'],
+    require_protocol: true,
+    require_tld: false,
+  })
   GITHUB_CALLBACK_URL!: string;
 
   /**

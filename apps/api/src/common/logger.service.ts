@@ -27,7 +27,9 @@ export class LoggerService {
   private correlationId: string | undefined;
   private correlationType: 'requestId' | 'socketId' | undefined;
 
-  constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {
+  constructor(
+    private readonly config: ConfigService<EnvironmentVariables, true>,
+  ) {
     const environment = config.get('NODE_ENV', { infer: true });
     const isTest = environment === NodeEnv.Test;
 

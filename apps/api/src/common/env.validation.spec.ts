@@ -86,7 +86,15 @@ describe('validate', () => {
 
   it('rejects missing runtime configuration instead of using implicit defaults', () => {
     const message = expectThrownMessage(() =>
-      validate(omit('PORT', 'WEB_ORIGIN', 'NODE_ENV', 'TRUSTED_PROXY_HOPS', 'LOG_LEVEL')),
+      validate(
+        omit(
+          'PORT',
+          'WEB_ORIGIN',
+          'NODE_ENV',
+          'TRUSTED_PROXY_HOPS',
+          'LOG_LEVEL',
+        ),
+      ),
     );
 
     expect(message).toMatch(/PORT/);
