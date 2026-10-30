@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import { Message } from './Message';
+import { buildTranscriptRows, startsAuthorGroup } from './messageGrouping';
 import type { MessageResponse } from '@/types/socket';
 
 interface MessageListProps {
@@ -23,6 +24,8 @@ interface MessageListProps {
 }
 
 const OLDER_BANNER_HEIGHT = 40;
+const DATE_DIVIDER_ESTIMATED_HEIGHT = 30;
+const MESSAGE_ROW_ESTIMATED_HEIGHT = 72;
 
 export function MessageList({
   messages,
@@ -43,14 +46,17 @@ export function MessageList({
 }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const loadOlderRef = useRef(false);
+  const transcriptRows = useMemo(() => buildTranscriptRows(messages), [messages]);
   // Scroll-position anchor captured just before a prepend so the viewport
   // stays on the messages the user was reading.
   const anchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: transcriptRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 72,
+    estimateSize: (index) => transcriptRows[index]?.kind === 'date'
+      ? DATE_DIVIDER_ESTIMATED_HEIGHT
+      : MESSAGE_ROW_ESTIMATED_HEIGHT,
     overscan: 8,
     paddingStart: hasMore ? OLDER_BANNER_HEIGHT : 0,
   });
@@ -116,7 +122,7 @@ export function MessageList({
     <div
       ref={parentRef}
       onScroll={handleScroll}
-      className="flex-1 min-h-0 overflow-y-auto relative"
+      className="scrollbar-hidden flex-1 min-h-0 overflow-y-auto relative"
     >
       {/* Load older trigger at top — in flow so it never covers the first row */}
       {hasMore && (
@@ -142,11 +148,11 @@ export function MessageList({
         }}
       >
         {virtualItems.map((virtualRow) => {
-          const message = messages[virtualRow.index];
-          if (!message) return null;
+          const row = transcriptRows[virtualRow.index];
+          if (!row) return null;
           return (
             <div
-              key={message.id}
+              key={row.kind === 'date' ? `date-${row.dayKey}` : row.message.id}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
               style={{
@@ -157,17 +163,30 @@ export function MessageList({
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
-              <Message
-                message={message}
-                isOwn={isOwn(message.authorId)}
-                canPost={canPost}
-                canDeleteOthers={canDeleteOthers}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onCopy={onCopy}
-                onRetry={onRetry}
-                onDiscard={onDiscard}
-              />
+              {row.kind === 'date' ? (
+                <div
+                  role="separator"
+                  aria-label={row.label}
+                  className="flex items-center gap-3 px-4 py-1.5 text-xs text-text-muted"
+                >
+                  <span aria-hidden="true" className="h-px flex-1 bg-border-subtle" />
+                  <time dateTime={row.dayKey}>{row.label}</time>
+                  <span aria-hidden="true" className="h-px flex-1 bg-border-subtle" />
+                </div>
+              ) : (
+                <Message
+                  message={row.message}
+                  showAuthor={startsAuthorGroup(messages, row.messageIndex)}
+                  isOwn={isOwn(row.message.authorId)}
+                  canPost={canPost}
+                  canDeleteOthers={canDeleteOthers}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onCopy={onCopy}
+                  onRetry={onRetry}
+                  onDiscard={onDiscard}
+                />
+              )}
             </div>
           );
         })}

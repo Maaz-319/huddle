@@ -93,7 +93,7 @@ export function Composer({
 
   return (
     <div className="flex flex-col gap-2 p-4 border-t border-border-subtle bg-bg-base">
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -113,7 +113,7 @@ export function Composer({
               maxHeight: `${window.innerHeight * 0.4}px`,
             }}
             className={cn(
-              'w-full px-4 py-3 bg-bg-raised border border-border-subtle rounded-2xl',
+              'scrollbar-hidden w-full px-4 py-3 bg-bg-raised border border-border-subtle rounded-2xl',
               'text-text-primary placeholder:text-text-muted',
               'focus:outline-none focus:ring-2 focus:ring-accent-electric',
               'resize-none',
