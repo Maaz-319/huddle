@@ -2,6 +2,8 @@
 
 Huddle is a real-time community chat app inspired by Discord. People create servers, organise conversations into channels, chat, and see who is online. The project focuses on two hard parts: live updates from server to browser, and permissions that combine server roles with channel rules.
 
+Youtube Video: [https://www.youtube.com/watch?v=hW708sz6Zpk]
+
 ## Main features
 
 - GitHub sign-in and user profiles
